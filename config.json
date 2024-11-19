@@ -1,0 +1,44 @@
+{
+    "Train_steps": ["step1", "step2", "step3", "step4", "step5"],
+	
+	"folder": {
+		"root": "E:/PyKGML/deposit_code_v2/",
+		"data_path": "processed_data/",
+		"output_path": "test_results/"
+	},
+	
+	"step1": {
+        "input_data": "recotest_data_scaled_v4_100sample.sav",
+		"sample_index": "traindataset_split_year_v1.sav",
+        "output_model": "recotest_v11_exp4_sample.sav1"
+    },
+    "step2": {
+        "input_data": "recotest_data_scaled_v4_100sample.sav",
+		"sample_index": "traindataset_split_year_v1.sav",
+		"pretrained_model": "recotest_v11_exp4.sav_step1",
+        "output_model": "recotest_v11_exp4_sample.sav_step2",
+		"synthetic_data": "sys_data2.sav"
+    },
+	"step3": {
+        "input_data": "recotest_data_scaled_v4_scalers.sav",
+		"pretrained_model": "recotest_v11_exp4.sav_step2",
+        "output_model": "recotest_v11_exp4_sample.sav_step3",
+		"synthetic_data": "sys_data1.sav"
+    },
+	"step4": {
+        "input_data": "recotest_data_scaled_v4_100sample.sav",
+		"sample_index": "traindataset_split_year_v1.sav",
+		"pretrained_model": "recotest_v11_exp4.sav_step3",
+        "output_model": "recotest_v11_exp4_sample.sav_step4",
+		"synthetic_data": "sys_data2.sav"
+    },
+	"step5": {
+        "input_data": "recotest_data_scaled_v4_scalers.sav",
+		"sample_index": "flux_split_year_v1.sav",
+		"pretrained_model": "recotest_v11_exp4.sav_step4",
+        "output_model": "recotest_v11_exp4_sample.sav_step5",
+		"synthetic_data": "sys_data10.sav",
+		"fluxtower_inputs": "fluxtower_inputs_noscale_v2.sav",
+		"fluxtower_observe": "fluxtower_observe_noscale_v2.sav"
+    }
+}
