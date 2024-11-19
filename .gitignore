@@ -1,0 +1,5 @@
+/.vscode
+/config.ini
+/kgml_lib.py
+/read_config.py
+/__pycache__
