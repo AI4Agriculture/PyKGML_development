@@ -38,10 +38,12 @@ def train(data_path:str, output_path:str, input_data:str, sample_index_file:str,
     n_out2=len(out2_names)
 
     #time series data name
-    fts_names = ['RADN','TMAX_AIR','TDIF_AIR','HMAX_AIR','HDIF_AIR','WIND','PRECN','Crop_Type','GPP','Ra','Rh','GrainC']
+    fts_name_1 = ['RADN','TMAX_AIR','TDIF_AIR','HMAX_AIR','HDIF_AIR','WIND','PRECN','Crop_Type','GPP']
+    fts_name_2 = ['Ra','Rh','GrainC']
+    fts_names = fts_name_1 + fts_name_2
     #SP data name
     fsp_names = ['TBKDS','TSAND','TSILT','TFC','TWP','TKSat','TSOC','TPH','TCEC']
-    f_names=['RADN','TMAX_AIR','TDIF_AIR','HMAX_AIR','HDIF_AIR','WIND','PRECN','Crop_Type','GPP']+['Year']+fsp_names
+    f_names= fts_name_1 + ['Year']+fsp_names
     n_f=len(f_names)
 
     #load data
@@ -66,15 +68,14 @@ def train(data_path:str, output_path:str, input_data:str, sample_index_file:str,
     for y in range(tyear):
         X[y*Tx:(y+1)*Tx,:,9] = y+start
 
-    range0=0
-    range1=1
+    # range0=0
+    # range1=1
     X[:,:,9], X_scaler[9,0], X_scaler[9,1] = Z_norm(X[:,:,9])
 
     for i in range(len(fsp_names)):
         X[:,:,10+i] = data0['Xsp'][:,i].view(1,bsz0).repeat(Tx*tyear,1)
         X_scaler[10+i,:] = data0['Xsp_scaler'][i,:]
-        
-        
+    
     #load in Y1
     Y1_scaler[0:2,:] = data0['X_scaler'][9:11,:]
     for i in range(2):
@@ -124,9 +125,9 @@ def train(data_path:str, output_path:str, input_data:str, sample_index_file:str,
         Y1_train = torch.from_numpy(np.einsum('ijk->jik', Y1.numpy()))
         Y2_train = torch.from_numpy(np.einsum('ijk->jik', Y2.numpy()))
 
-    train_n = X_train.size(0)
+    train_n = X_train.size(0) # train_n is 100
     #create mask for each data point. Random choose 2 year maske 0
-    sample_index = np.random.randint(18, size=(train_n,2))
+    sample_index = np.random.randint(18, size=(train_n,2)) # [100,2], values 0-17
     print(sample_index.max(),sample_index.min(),sample_index.shape)
 
     if not os.path.exists (data_path +  sample_index_file):  #'traindataset_split_year_v1.sav'
@@ -145,9 +146,12 @@ def train(data_path:str, output_path:str, input_data:str, sample_index_file:str,
         for y in range(2):
             Y1_mask_train[i,sample_index[i,y]*Tx:(sample_index[i,y]+1)*Tx,:] = 0.0
             Y1_mask_val[i,sample_index[i,y]*Tx:(sample_index[i,y]+1)*Tx,:] = 1.0
+            # Move into loop for easy understanding
+            Y2_mask_train[i,sample_index[i,y],:] = 0.0
+            Y2_mask_val[i,sample_index[i,y],:] = 1.0
 
-        Y2_mask_train[i,sample_index[i,:],:] = 0.0
-        Y2_mask_val[i,sample_index[i,:],:] = 1.0
+        #Y2_mask_train[i,sample_index[i,:],:] = 0.0
+        #Y2_mask_val[i,sample_index[i,:],:] = 1.0
 
     Y1_maskb_val = Y1_mask_val.ge(0.5)
     Y2_maskb_val = Y2_mask_val.ge(0.5)
@@ -216,11 +220,11 @@ def train(data_path:str, output_path:str, input_data:str, sample_index_file:str,
     #during training
     slw=365
     slw05=365
-    maxit=int((totsq-slw)/slw05+1)
+    maxit=int((totsq-slw)/slw05+1) # 18
     #during validation
     slw_val=slw05 #use step size to predict
     slw05_val=slw05
-    maxit_val=int((totsq-slw_val)/slw05_val+1)
+    maxit_val=int((totsq-slw_val)/slw05_val+1) # 18
     train_losses = []
     val_losses = []
     maxepoch=80
@@ -230,14 +234,17 @@ def train(data_path:str, output_path:str, input_data:str, sample_index_file:str,
         stop_program()
     ###Only run following codes when with a GPU
 
-    model1.train()
+    
     for epoch in range(maxepoch):
+
+        model1.train()
+
         train_loss=0.0
         train_loss1=0.0
         train_loss2=0.0
         train_loss3=0.0
         val_loss=0.0
-        #shuffled the training data
+        #shuffled the training data, shuffle site ID
         shuffled_b=torch.randperm(X_train.size()[0]) 
         X_train_new=X_train[shuffled_b,:,:] 
         Y1_train_new=Y1_train[shuffled_b,:,:]
@@ -245,7 +252,7 @@ def train(data_path:str, output_path:str, input_data:str, sample_index_file:str,
         Y1_maskb_train_new = Y1_mask_train_new.ge(0.5)
         Y1_pred_all=torch.zeros(Y1_train_new.size(),device=device)
         model1.zero_grad()
-        for bb in range(int(train_n/bsz)):
+        for bb in range(int(train_n/bsz)): # 100/50 = 2
             if bb != int(train_n/bsz)-1:
                 sbb = bb*bsz
                 ebb = (bb+1)*bsz
@@ -355,7 +362,7 @@ def train(data_path:str, output_path:str, input_data:str, sample_index_file:str,
 
             if np.mean(train_R2)> 0.999 or (epoch - best_epoch) > 10:
                 break
-        model1.train()
+        #model1.train()
 
     endtime=time.time()
     path_fs = path_save +'fs'
