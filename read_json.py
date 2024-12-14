@@ -32,7 +32,7 @@ for step in train_steps:
         module.train(data_path, output_path, input_data, sample_index_file, output_model)
 
     elif step == 'step2':
-        continue
+        #continue
         module = importlib.import_module(step)
 
         step_cfg = config['step2']
@@ -46,7 +46,7 @@ for step in train_steps:
           pretrained_model, output_model, synthetic_data)
 
     elif step == 'step3':
-        #continue
+        continue
         module = importlib.import_module(step)
 
         step_cfg = config['step3']
@@ -59,7 +59,7 @@ for step in train_steps:
         module.train(data_path, output_path, input_data, #sample_index_file, 
           pretrained_model, output_model, synthetic_data)
     elif step == 'step4':
-        #continue
+        continue
         module = importlib.import_module(step)
 
         step_cfg = config['step4']
@@ -73,6 +73,7 @@ for step in train_steps:
           pretrained_model, output_model, synthetic_data)
 
     elif step == 'step5':
+        continue
         module = importlib.import_module(step)
 
         step_cfg = config['step5']

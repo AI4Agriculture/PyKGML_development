@@ -280,9 +280,9 @@ def train(data_path:str, output_path:str, input_data:str, sample_index_file:str,
                 for zz in range(len(hidden)):
                     hidden[zz].detach_()  
             #######MSE and mass balance loss
-            loss,loss1,loss2,loss3 = myloss_mb_flux_mask_re_v2(Y_Ra_pred_all,Y_Rh_pred_all,Y_NEE_pred_all,\
-                                                    Y_Reco_obs_new, Y_NEE_obs_new,\
-                                    X_sites_new,X_scaler[8,:], Y1_scaler,\
+            loss,loss1,loss2,loss3 = myloss_mb_flux_mask_re_v2(Y_Ra_pred_all,Y_Rh_pred_all,Y_NEE_pred_all,
+                                                    Y_Reco_obs_new, Y_NEE_obs_new,
+                                    X_sites_new,X_scaler[8,:], Y1_scaler,
                                     Y_masks_train_new, lamda,tol_mb)
             optimizer.zero_grad()
             loss.backward()
