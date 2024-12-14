@@ -15,7 +15,7 @@ import scipy.stats as stats
 
 import kgml_lib
 
-from dataset import DataSet
+from dataset import Step2_DataSet
 
 
 # define functions from kgml_lib
@@ -32,7 +32,7 @@ def stop_program():
     raise SystemExit("Program terminated due to using CPU.")
 
 class Kgml_Model:
-    def __init__(self, input_path:str, output_path:str, pretrained_model:str, output_model:str, synthetic_data:str, dataset:DataSet):
+    def __init__(self, input_path:str, output_path:str, pretrained_model:str, output_model:str, synthetic_data:str, dataset:Step2_DataSet):
         self.input_path = input_path
         self.output_path = output_path
         self.pretrained_model = input_path + pretrained_model
@@ -193,9 +193,9 @@ class Kgml_Model:
                 for it in range(maxit):
                     #print(sbb,ebb,X_train_new[slw05*it:slw05*it+slw,sbb:ebb,:].size(),hidden.size(),X_train_new.size())
                     Y1_pred,Y2_pred,hidden = model1(X_train_new[sbb:ebb,slw05*it:slw05*it+slw,:].to(device),hidden)
-                    loss,loss1,loss2 = myloss_mb_flux_mask(Y1_pred,Y1_train_new[sbb:ebb,slw05*it:slw05*it+slw,:].to(device), \
-                                    X_train_new[sbb:ebb,slw05*it:slw05*it+slw,GPP_index].to(device), \
-                                    GPP_scaler, Y1_scaler,\
+                    loss,loss1,loss2 = myloss_mb_flux_mask(Y1_pred,Y1_train_new[sbb:ebb,slw05*it:slw05*it+slw,:].to(device), 
+                                    X_train_new[sbb:ebb,slw05*it:slw05*it+slw,GPP_index].to(device), 
+                                    GPP_scaler, Y1_scaler,
                                     Y1_mask_train_new[sbb:ebb,slw05*it:slw05*it+slw,0].to(device), loss_weights, lamda,tol_mb)
                     for zz in range(len(hidden)):
                         hidden[zz].detach_()
@@ -554,8 +554,8 @@ if __name__ == "__main__":
     output_model = "recotest_v11_exp4_sample.sav_step2"
     synthetic_data = "sys_data2.sav"
 
-    dataset = DataSet(data_path, input_data, output_path, sample_index_file)
-    dataset.load()
+    dataset = Step2_DataSet(data_path, input_data, output_path, sample_index_file)
+    dataset.load_step2_data()
 
     dataset.prepare_step2_data()
 

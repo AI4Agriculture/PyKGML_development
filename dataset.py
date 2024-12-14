@@ -7,7 +7,16 @@ import kgml_lib
 Z_norm = kgml_lib.Z_norm 
 Z_norm_reverse = kgml_lib.Z_norm_reverse
 
-class DataSet:
+Z_norm_with_scaler = kgml_lib.Z_norm_with_scaler
+get_gpu_memory = kgml_lib.get_gpu_memory
+compute_r2=kgml_lib.R2Loss()
+myloss_mb_flux_mask_re_v2 = kgml_lib.myloss_mb_flux_mask_re_v2
+myloss_mb_flux_mask_re =kgml_lib. myloss_mb_flux_mask_re
+check_Ra_Rh_response_v2 = kgml_lib.check_Ra_Rh_response_v2
+Get_Ra_Rh_org = kgml_lib.Get_Ra_Rh_org
+check_Rh_response_v2 = kgml_lib.check_Rh_response_v2
+
+class Step2_DataSet:
     '''
     data_path: input data directory
     input_data: input dataset file name
@@ -38,7 +47,7 @@ class DataSet:
         self.f_names = self.fts_names_1 + ['Year']+ self.fsp_names # total 9+ 1+ 9 features
         self.n_f = len(self.f_names) # The number of features, now is 19 features
 
-    def load(self):
+    def load_step2_data(self):
         self.data = torch.load(self.data_path + self.input_data, weights_only=False)
         # FIPS_ref is the unique code for each site
         # and FIPS is the county number being used in US
@@ -254,7 +263,6 @@ class DataSet:
         
         return sample_index
 
-
     # random choice n_years for each site as val dataset
     def train_test_split(self, batch_first=True, sample_index_file="traindataset_split_year_v1.sav", 
                         n_years:int =2, random_state=42):
@@ -313,13 +321,154 @@ class DataSet:
         # self.Y2_mask_val = Y2_mask_val
         # self.Y2_maskb_val = Y2_maskb_val
 
-
-
-    # def Z_score(self, X: torch.Tensor) -> float:
-    #     X_mean = X.numpy().mean(dtype=np.float64)
-    #     X_std = np.std(np.array(X, dtype=np.float64))
-    #     return (X - X_mean) / X_std, X_mean, X_std
+class Step5_DataSet:
+    '''
+    data_path: input data directory
+    input_data: input dataset file name
+    out_path: output directory
+    sample_index_file: random pickup two years for each site, this file store the index of selected years.
+    '''
+    # sample_index_file:str,
+    def __init__(self,data_path: str, out_path: str,
+                 start: int = 2001, end: int =2018, Tx: int = 365, 
+                 outNames_1: list = ['Ra','Rh','NEE'], outNames_2: list = ['Yield']) -> None:
         
-    # def Z_score_inv(self, X: torch.Tensor, scaler: np.array, units_convert: float = 1.0) -> torch.Tensor:
-    #     mean, std = scaler[0], scaler[1]
-    #     return (X * std + mean) * units_convert
+        self.data_path = data_path
+        self.out_path = out_path
+
+        #self.sample_index_file = sample_index_file
+        self.start = start
+        self.end = end
+        self.Tx = Tx
+        self.tyear = end - start + 1
+        self.outNames_1 = outNames_1
+        self.outNames_2 = outNames_2
+        self.n_out1 = len(outNames_1)
+        self.n_out2 = len(outNames_2)
+        self.fts_names_1 = ['RADN','TMAX_AIR','TDIF_AIR','HMAX_AIR','HDIF_AIR','WIND','PRECN','Crop_Type','GPP'] # 9 features
+        self.fts_names_2 = ['Ra','Rh','GrainC'] # Not used
+        #['RADN','TMAX_AIR','TDIF_AIR','HMAX_AIR','HDIF_AIR','WIND','PRECN','Crop_Type','GPP','Ra','Rh','GrainC']
+        self.fts_names = self.fts_names_1 + self.fts_names_2 # Not used 
+        self.fsp_names = ['TBKDS','TSAND','TSILT','TFC','TWP','TKSat','TSOC','TPH','TCEC'] # 9 features
+        self.f_names = self.fts_names_1 + ['Year']+ self.fsp_names # total 9+ 1+ 9 features
+        self.n_f = len(self.f_names) # The number of features, now is 19 features
+
+        self.device = torch.device("cuda")
+
+    def load_scaler_data(self, scaler_file):
+        data0 = torch.load(self.data_path + scaler_file, weights_only=False)
+        
+        self.X_scaler = data0['X_scaler']
+        self.Y1_scaler = data0['Y1_scaler']
+        self.Y2_scaler = data0['Y2_scaler']
+        self.Res_scaler = data0['Res_scaler']
+        self.GPP_Res_fmean = data0['GPP_Res_fmean']
+
+        self.data = data0
+
+    # file: 'fluxtower_inputs_noscale_v2.sav'
+    def load_fluxtower_inputs_data(self, fluxtower_input_file):
+        path_load = self.data_path + fluxtower_input_file
+        data0=torch.load(path_load, weights_only=False)
+        self.mode_input = data0['mode_input']
+    
+    # file: 'fluxtower_observe_noscale_v2.sav'
+    def load_fluxtower_observe_data(self, fluxtower_observe_file): 
+        path_load = self.data_path + fluxtower_observe_file
+        data0=torch.load(path_load, weights_only=False)
+        self.org_Reco = data0['org_Reco']
+        self.org_NEE = data0['org_NEE']
+
+    # create sample index and mask for train and validation
+    def create_sample_index(self,sample_index_file="flux_split_year_v1.sav", n_years:int =2):
+
+        sample_indexes = []
+        for i in range(len(self.mode_input)):
+            tyear1 = self.org_Reco[i].shape[0] # total years
+            # Random pickup two years from tyear1
+            sample_index = np.random.randint(tyear1, size=n_years)
+            sample_indexes.append(sample_index)
+                
+        if not os.path.exists (self.out_path + sample_index_file):
+            torch.save({'sample_indexes':sample_indexes,
+                    },self.out_path + sample_index_file)
+            
+        return sample_indexes
+
+    def prepare_data(self, sample_index_file):
+
+        device = self.device
+
+        Y_Reco_obs = []
+        Y_NEE_obs = []
+        X_sites = []
+        Y_masks = []
+        Y_masksb = []
+        Y_masks_train = []
+        Y_masks_val = []
+        #sample_indexes = []
+        if os.path.exists (self.out_path + sample_index_file):
+            tmp = torch.load(self.out_path + sample_index_file,weights_only=False)
+            sample_indexes = tmp['sample_indexes']
+        else:
+            sample_indexes = self.create_sample_index(sample_index_file, n_years=2)
+        
+        
+        for i in range(len(self.mode_input)):
+            tyear1 = self.org_Reco[i].shape[0] # total years
+            totsq1= self.mode_input[i].size(1) # 365* total years
+            #1) reshape the observed data to predicted scale
+            Y_Reco_obs_t = np.zeros(totsq1)
+            Y_NEE_obs_t = np.zeros(totsq1)
+            Y_mask_t = np.zeros(totsq1) + 1.0
+            for y in range(tyear1):
+                Y_Reco_obs_t[y*365:(y+1)*365] = self.org_Reco[i][y,0:365]
+                Y_NEE_obs_t[y*365:(y+1)*365]= self.org_NEE[i][y,0:365]
+            
+            #replace nan to 0 to avoid error
+            nanindex = np.logical_or(np.isnan(Y_Reco_obs_t),np.isnan(Y_NEE_obs_t))
+            Y_Reco_obs_t[nanindex] = 0.0 
+            Y_NEE_obs_t[nanindex] = 0.0
+            Y_mask_t[nanindex] = 0.0
+            GPP_obs_t = Y_Reco_obs_t - Y_NEE_obs_t
+            GPP_obs_t[nanindex] = self.mode_input[i][0,nanindex,8].numpy()
+            nanindex = np.isnan(GPP_obs_t)
+            GPP_obs_t[nanindex] = 0.0
+            Y_mask_t[nanindex] = 0.0
+            #corrected GPP
+            self.mode_input[i][0,:,8] = torch.from_numpy(GPP_obs_t)
+            Y_Reco_obs.append(torch.from_numpy(Y_Reco_obs_t).to(device))
+            Y_NEE_obs.append(torch.from_numpy(Y_NEE_obs_t).to(device))
+            Y_masks.append(torch.from_numpy(Y_mask_t).to(device))
+            
+            #2) scale th org model input
+            X_site = torch.zeros(self.mode_input[i].size())
+            for f in range(len(self.f_names)):
+                X_site[:,:,f] = Z_norm_with_scaler(self.mode_input[i][:,:,f],self.X_scaler[f,:])
+            X_sites.append(X_site.to(device))
+            print(Y_masks[i].shape,X_sites[i].shape)
+            #print(Y_masks[i].size(),X_sites[i].size())
+
+            #######develop sample index and mask for train and validation
+            # sample_index = np.random.randint(tyear1, size=(2))
+            # if len(sample_indexes) > i:
+            #     sample_index = sample_indexes[i]
+            # else:
+            #     sample_indexes.append(sample_index)
+            
+            sample_index = sample_indexes[i]
+            Y_mask_train=torch.zeros(Y_masks[i].shape)+1.0
+            Y_mask_val=torch.zeros(Y_masks[i].shape)
+            for yy in range(2):
+                Y_mask_train[sample_index[yy]*365:(sample_index[yy]+1)*365] = 0.0
+                Y_mask_val[sample_index[yy]*365:(sample_index[yy]+1)*365] = 1.0
+            Y_masks_train.append(Y_mask_train.to(device)*Y_masks[i])
+            Y_masks_val.append(Y_mask_val.to(device)*Y_masks[i])
+
+        self.X_sites = X_sites
+        self.Y_Reco_obs = Y_Reco_obs
+        self.Y_NEE_obs = Y_NEE_obs
+        self.Y_masks_train = Y_masks_train
+        self.Y_masks_val = Y_masks_val
+
+
