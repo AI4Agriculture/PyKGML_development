@@ -28,6 +28,17 @@ class R2Loss(nn.Module):
     def forward(self, y_pred, y):
         var_y = torch.var(y, unbiased=False)
         return 1.0 - F.mse_loss(y_pred, y, reduction="mean") / var_y
+
+class R2Loss_mul(nn.Module):
+    def forward(self, y_pred, y):
+        # Compute variance per feature across the sequence dimension
+        var_y = torch.var(y, dim=1, unbiased=False)  # Shape: [N, feature]
+        mse_loss = F.mse_loss(y_pred, y, reduction="none")  # Shape: [N, sequence, feature]
+        mse_loss = torch.mean(mse_loss, dim=1)  # Average over the sequence dimension, shape: [N, feature]
+
+        r2 = 1.0 - (mse_loss / var_y)  # Compute R^2 per feature
+        return torch.mean(r2, dim=0)
+    
 def get_gpu_memory():
   _output_to_list = lambda x: x.decode('ascii').split('\n')[:-1]
 
@@ -84,6 +95,23 @@ def pearsonr(x, y):
     r_den = torch.norm(xm, 2) * torch.norm(ym, 2)
     r_val = r_num / r_den
     return r_val
+
+#sample data considering dropout and leadtime (120 days from 365 days)    
+def sample_data_FN(X, Y, fn_ind):
+    #find the fertilized time
+    # print(np.sum(X[:,1,fn_ind].to("cpu").numpy()>0))
+    fntime_ind=np.where(X[:,1,fn_ind].view(-1).to("cpu").numpy()>0)[0]
+    # print(fntime_ind)
+    #get focused data only for fertilized period with random leading time
+    for t in fntime_ind:
+        if t == fntime_ind[0]:
+            X_new = X[t-30:t+90,:,:]
+            Y_new = Y[t-30:t+90,:,:]
+        else:
+            X_new = torch.cat((X_new,X[t-30:t+90,:,:]),1)
+            Y_new = torch.cat((Y_new,Y[t-30:t+90,:,:]),1)
+    return X_new,Y_new
+
 
 ##########################################################################################
 #Models
