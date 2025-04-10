@@ -9,7 +9,7 @@ study 2: Liu et al. (2024). Knowledge-guided machine learning can improve carbon
 Study 1 pretrained models to predict N2O fluxes using ecosys synthetic data and fine tuned them using mesocosm data. Study 2 developed KGML for predicting and partitioning CO2 fluxes (Ra, Rh, NEE), using synthetic data in the pretraining step and flux tower observations for fine-tuning. To differentiate KGML models from the two studies, we call the model of study 1 KGMLag-CO2 and that of study 2 KGMLag-N2O.
 
 # Files:
-- Original code
+- Original code\n
   • KGMLag_CO2_pretrain_baseline.py and KGMLag_CO2_finetune_baseline.py are the original code from study 1. 
   • KGMLag_N2O_pretrain_baseline.ipynb and KGMLag_N2O_finetune_baseline.ipynb are the original code from study 2.
   
