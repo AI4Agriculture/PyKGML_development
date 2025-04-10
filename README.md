@@ -30,6 +30,7 @@ Study 1 pretrained KGML models to predict N2O fluxes using ecosys synthetic data
   • test_KGMLag_CO2_finetune.ipynb is a testing call on KGMLag_CO2_finetune_modularized.py
   
 - packaged code
+  
   • dataset.py is used to prepare demo datasets used for pretraining and fine-tuning: Step2_DataSet is the CO2 synthetic dataset for pretraining, and Step5_DataSet is the CO2 flux tower dataset for fine- 
   tuning. N2O_synthetic_dataset and N2O_mesocosm_dataset are the N2O pretraining and fine-tuning datasets, respectively.
   
