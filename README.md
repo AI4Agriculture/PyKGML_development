@@ -8,7 +8,7 @@ study 1: Liu et al (2022). KGML-ag: a modeling framework of knowledge-guided mac
 
 study 2: Liu et al. (2024). Knowledge-guided machine learning can improve carbon cycle quantification in agroecosystems. Nature communications, 15(1), 357. https://www.nature.com/articles/s41467-023-43860-5
 
-Study 1 pretrained models to predict N2O fluxes using ecosys synthetic data and fine tuned them using mesocosm data. Study 2 developed KGML for predicting and partitioning CO2 fluxes (Ra, Rh, NEE), using synthetic data in the pretraining step and flux tower observations for fine-tuning. To differentiate KGML models from the two studies, we call the model of study 1 KGMLag-CO2 and that of study 2 KGMLag-N2O.
+Study 1 pretrained KGML models to predict N2O fluxes using ecosys synthetic data and fine tuned them using mesocosm data. Study 2 developed KGML models for predicting and partitioning CO2 fluxes (Ra, Rh, NEE), using synthetic data in the pretraining step and flux tower observations for fine-tuning. To differentiate KGML models from the two studies, we call the model of study 1 KGMLag-CO2 and that of study 2 KGMLag-N2O.
 
 # Files:
 - Original code
