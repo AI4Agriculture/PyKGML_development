@@ -52,6 +52,37 @@ def scalar_maxmin(X):
 def Z_norm_with_scaler(X,Xscaler):
     return (X-Xscaler[0])/Xscaler[1]
 
+
+def n2o_my_loss(outputs, targets, weights):
+
+    loss1 = weights[0] * torch.mean((outputs[:, 0] - targets[:, 0])**2)
+    loss2 = weights[1] * torch.mean((outputs[:, 1] - targets[:, 1])**2) 
+    loss3 = weights[2] * torch.mean((outputs[:, 2] - targets[:, 2])**2)  
+    loss4 = weights[3] * torch.mean((outputs[:, 3] - targets[:, 3])**2) 
+    loss5 = weights[4] * torch.mean((outputs[:, 4] - targets[:, 4])**2) 
+    
+
+    total_loss = loss1 + loss2 + loss3 + loss4 + loss5
+    return total_loss, loss1, loss2, loss3, loss4, loss5
+
+
+def gru_n2o_my_loss(outputs, targets, weights):
+
+    loss1 = weights[0] * torch.mean((outputs[:, :, 0] - targets[:, :, 0])**2)
+    loss2 = weights[1] * torch.mean((outputs[:, :, 1] - targets[:, :, 1])**2)
+    loss3 = weights[2] * torch.mean((outputs[:, :, 2] - targets[:, :, 2])**2)
+    loss4 = weights[3] * torch.mean((outputs[:, :, 3] - targets[:, :, 3])**2)
+    loss5 = weights[4] * torch.mean((outputs[:, :, 4] - targets[:, :, 4])**2)
+
+    
+
+    total_loss = loss1 + loss2 + loss3 + loss4 + loss5
+    return total_loss, loss1, loss2, loss3, loss4, loss5
+    
+def mlp_my_loss(outputs, targets):
+    loss = torch.mean((outputs - targets)**2)
+    return loss
+
 def pearsonr(x, y):
     """
     Mimics `scipy.stats.pearsonr`

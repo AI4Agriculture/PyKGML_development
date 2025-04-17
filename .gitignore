@@ -3,3 +3,12 @@
 /config.ini
 /read_config.py
 /__pycache__
+/data/
+/lstm_test_results/
+/gru_test_results/
+/transformer_test_results/
+/test_results_mlp/
+/test_results_cnn/
+/.DS_Store
+/gpu_usage.log
+/main.py

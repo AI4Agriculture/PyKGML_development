@@ -350,6 +350,7 @@ class Kgml_Model:
             data.Y1_train_pred, data.Y2_train_pred=  self.check_results(device,model_trained,total_b,bsz,
                     data.X_train[0:total_b,:,:],data.Y1_train[0:total_b,:,:],data.Y2_train[0:total_b,:,:],
                     slw05,slw,maxit,starttime) 
+            
 
         endtime=time.time()
         print(f"Total spending time: {endtime - starttime}s")

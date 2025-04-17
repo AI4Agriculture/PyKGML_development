@@ -2,6 +2,7 @@ import os
 import torch
 import numpy as np
 import kgml_lib
+import torch.nn.functional as F
 
 # define functions from kgml_lib
 Z_norm = kgml_lib.Z_norm 
@@ -472,3 +473,74 @@ class Step5_DataSet:
         self.Y_masks_val = Y_masks_val
 
 
+
+class Trad_ml_DataSet:
+    '''
+    data_path: input data directory
+    input_data: input dataset file name
+    out_path: output directory
+    '''
+
+    def __init__(self, data_path: str, scaler_file: str, input_data: str, out_path: str, sample_index_file: str = None, Tx: int = 365):
+
+        self.data_path = data_path
+        self.input_data = input_data
+        self.out_path = out_path
+        self.sample_index_file = sample_index_file
+        self.scaler_file = scaler_file
+        self.Tx = Tx
+        self.tyear = 18  # Total years (18)
+
+        self.n_X = 16
+        self.n_Y = 5
+
+    def load_data(self):
+        """Load the data file"""
+        file_path = os.path.join(self.data_path, self.input_data)
+        self.data = torch.load(file_path)  # Shape: (365, site-year, 21)
+
+
+        self.data = self.data.transpose(1, 0, 2)
+        self.data = self.data.reshape(1980, 18, 365, 21)  # (num_sites, 18, 365, 21)
+        
+        self.data = self.data[10::20, :, :, :]
+        self.bsz = self.data.shape[0]  
+        print(f"Data loaded, shape: {self.data.shape}")  # (99, 18, 364, 21)
+
+        scaler_file_path = os.path.join(self.data_path, self.scaler_file)
+        self.scaler = torch.load(scaler_file_path)
+
+
+    def parse_data_with_window(self):
+        """Extract features and ensure correct shape"""
+        X_all = self.data[:, :, :, :self.n_X]  # (99, 18, 364, n_X)
+        Y_all = self.data[:, :, :, self.n_X:self.n_X + self.n_Y]  # (99, 18, 364, n_Y)
+
+        X_all = torch.tensor(X_all, dtype=torch.float32)
+        Y_all = torch.tensor(Y_all, dtype=torch.float32)
+
+        print(X_all.shape, Y_all.shape)
+        self.X = X_all
+        self.Y = Y_all
+        return X_all, Y_all
+
+
+
+    def train_test_split(self, train_ratio=0.84):
+        """Split data into training and validation sets by site"""
+        num_train_sites = int(99 * train_ratio)
+        self.X_train = self.X[:num_train_sites]  # First 80% sites for training
+        self.X_val = self.X[num_train_sites:]  # Last 20% sites for validation
+        self.Y_train = self.Y[:num_train_sites]
+        self.Y_val = self.Y[num_train_sites:]
+
+        print("Training-validation split completed")
+        print(f"Train X shape: {self.X_train.shape}, Val X shape: {self.X_val.shape}")
+        print(f"Train Y shape: {self.Y_train.shape}, Val Y shape: {self.Y_val.shape}")
+
+    def print_dataset_info(self):
+        """Print dataset details"""
+        print("\n==== Dataset Information ====")
+        print(f"Data path: {self.data_path}")
+        print(f"Total years: {self.tyear}, Days per year: {self.Tx}")
+        print(f"Number of input features: {self.n_X}, Number of output features: {self.n_Y}")
