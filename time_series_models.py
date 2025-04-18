@@ -9,6 +9,14 @@ from torch.utils.data import Dataset, DataLoader
 # from sequence_dataset import SequenceDataset, train_test_split
 
 import matplotlib.pyplot as plt
+from sklearn.metrics import r2_score, mean_squared_error
+import scipy.stats as stats
+
+def Z_norm_reverse(X,Xscaler,units_convert=1.0):
+    return (X*Xscaler[1]+Xscaler[0])*units_convert
+
+def Z_norm_with_scaler(X,Xscaler):
+    return (X-Xscaler[0])/Xscaler[1]
 
 class SequenceDataset(Dataset):
     def __init__(self, inputs, outputs, sequence_length=365):
@@ -112,16 +120,20 @@ class TimeSeriesModel(nn.Module):
         test_dataset = SequenceDataset(X_test, Y_test, sequence_length)
 
         # Create DataLoaders.
-        self.train_loader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=False)
+        self.train_loader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=True)
         self.test_loader  = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
         # return train_loader, test_loader
 
-    def train_model(self, LR=0.001,step_size=20, gamma=0.8, maxepoch=80):
+    def train_model(self, loss_fun, LR=0.001,step_size=20, gamma=0.8, maxepoch=80):
 
-        # model = self.model
+        # Initial parameters
+        self.train_losses = []
+        self.val_losses = []
+        self.epochs = 0
+
         self.to(self.device)
-        self.criterion = nn.MSELoss() # nn.L1Loss() # For regression
+        self.criterion = loss_fun # nn.L1Loss() # nn.MSELoss() # For regression
         # optimizer = optim.Adam(model.parameters(), lr=LR)
         optimizer = optim.Adam(self.parameters(), lr=LR)
 
@@ -228,10 +240,17 @@ class TimeSeriesModel(nn.Module):
         avg_test_loss = np.mean(test_losses)
         print(f"Test Loss: {avg_test_loss:.4f}")
 
-        # (Optional) If you want to concatenate all predictions and targets:
-        all_predictions = torch.cat(all_predictions, dim=0)
-        all_targets = torch.cat(all_targets, dim=0)
+        # Save true value and prediction for next step calculation :
+        self.all_predictions = torch.cat(all_predictions, dim=0)
+        self.all_targets = torch.cat(all_targets, dim=0)
 
+    def get_R2_score(self, y_scaler:list, output_feature_name:list):
+        y_param_num = self.all_targets.shape[-1]
+        all_predictions_flat = self.all_predictions.reshape(-1,y_param_num)
+        all_targets_flat = self.all_targets.reshape(-1,y_param_num)
+        for i in range(y_param_num):
+            _r2 = r2_score(Z_norm_reverse(all_targets_flat[:,i], y_scaler[i]), Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i]))
+            print(f"Feature {output_feature_name[i]} R2 Score is: {_r2}")
 
     def plot_training_curves(self):
         epoch_list = np.arange(1, self.epochs + 1)
@@ -243,6 +262,70 @@ class TimeSeriesModel(nn.Module):
         plt.title('Training Progress')
         plt.legend()
         plt.grid(True)
+        plt.show()
+
+    def Vis_prediction_result(self, y_scaler:list, features:list):
+        y_param_num = self.all_targets.shape[-1]
+        all_predictions_flat = self.all_predictions.reshape(-1,y_param_num)
+        all_targets_flat = self.all_targets.reshape(-1,y_param_num)
+        
+        N, F = all_targets_flat.shape
+
+        fig, axes = plt.subplots(F, 2, figsize=(12, 4*F))
+
+        for i, name in enumerate(features):
+            ax_line, ax_scatter = axes[i]
+
+            y_true = Z_norm_reverse(all_targets_flat[:,i], y_scaler[i]).numpy()
+            y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i]).numpy()
+            
+            # 1) LINE PLOT: Days index vs. values
+            ax_line.plot(np.arange(N), y_true, label='True', lw=1)
+            ax_line.plot(np.arange(N), y_pred, label='Pred', lw=1, alpha=0.7)
+            ax_line.set_title(f"{name} over Days")
+            ax_line.set_xlabel("Days Index")
+            ax_line.set_ylabel(name)
+            ax_line.legend(fontsize=8)
+
+            # 2) SCATTER PLOT: true vs. pred
+            mn = min(y_true.min(), y_pred.min())
+            mx = max(y_true.max(), y_pred.max())
+
+            m, b, r_value, p_value, std_err = stats.linregress(y_true, y_pred) #r,p,std
+            ax_scatter.plot(y_pred, m*y_pred + b,color='red',lw=1.0)
+            ax_scatter.plot([mn, mx], [mn, mx],color='steelblue',linestyle='--')
+
+            # Compute metrics
+            r2   = r2_score(y_true, y_pred)
+            rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+            bias = np.mean(y_pred - y_true)
+
+            # Format text
+            stats_text = (
+                f"$R^2$ = {r2:.3f}\n"
+                f"RMSE = {rmse:.3f}\n"
+                f"Bias = {bias:.3f}"
+            )
+
+            # Place text in the upper left in axes©\fraction coordinates
+            ax_scatter.text(
+                0.05, 0.95, stats_text,
+                transform= ax_scatter.transAxes,
+                fontsize=10,
+                verticalalignment='top',
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.7)
+            )
+
+            ax_scatter.scatter(y_true, y_pred, alpha=0.4, s=10)
+            # ax_scatter.plot([mn, mx], [mn, mx], 'k--', lw=1)
+            ax_scatter.set_title(f"{name}: True vs. Predicted")
+            ax_scatter.set_xlabel("True Value")
+            ax_scatter.set_ylabel("Predicted Value")
+            ax_scatter.set_xlim(mn, mx)
+            ax_scatter.set_ylim(mn, mx)
+
+        # Tighten up and show
+        plt.tight_layout()
         plt.show()
 
 # A GRU with Attension Regression Model
