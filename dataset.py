@@ -325,9 +325,9 @@ class N2O_synthetic_dataset:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 
     def load_data(self):
-        self.data = torch.tensor(torch.load(self.data_path)) # test with a smaller dataset [:,:1000,:]
+        self.data = torch.tensor(torch.load(self.data_path, weights_only=False)) # test with a smaller dataset [:,:1000,:]
         if self.scaler_path:
-            self.scalers = torch.tensor(torch.load(self.scaler_path))
+            self.scalers = torch.tensor(torch.load(self.scaler_path, weights_only=False))
         else:
             self.scalers = None
             print('Scalers of the dataset are not provided, will implement normalization in the step of prepare_data()')
@@ -407,10 +407,10 @@ class N2O_mesocosm_dataset:
         self.n_out2 = self.n_out - self.n_out1
         self.device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 
-    def load_data(self, ):
-        self.data = torch.tensor(torch.load(self.input_data)) # test with a smaller dataset [:,:1000,:]
+    def load_data(self):
+        self.data = torch.tensor(torch.load(self.input_data, weights_only=False)) # test with a smaller dataset [:,:1000,:]
         if self.scaler_path:
-            self.scalers = torch.tensor(torch.load(self.scaler_data))
+            self.scalers = torch.tensor(torch.load(self.scaler_data, weights_only=False))
         else:
             print('Please provide scalers for the fine tune dataset')
         self.batch_total = self.data.size()[1] # site sample size in the 3 dimension data [DOY, site, features]
