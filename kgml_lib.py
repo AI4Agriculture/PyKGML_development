@@ -50,8 +50,8 @@ def get_gpu_memory():
   return memory_free_values
 
 def Z_norm(X):
-    X_mean=X.numpy().mean(dtype=np.float64)
-    X_std=np.std(np.array(X,dtype=np.float64))
+    X_mean=X.numpy().mean(dtype=np.float32)
+    X_std=np.std(np.array(X,dtype=np.float32))
     return (X-X_mean)/X_std, X_mean, X_std
 
 def Z_norm_reverse(X,Xscaler,units_convert=1.0):

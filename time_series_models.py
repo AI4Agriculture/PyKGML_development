@@ -19,16 +19,16 @@ def Z_norm_with_scaler(X,Xscaler):
     return (X-Xscaler[0])/Xscaler[1]
 
 class SequenceDataset(Dataset):
-    def __init__(self, inputs, outputs, sequence_length=365):
+    def __init__(self, inputs, outputs, days_per_year=365):
         """
         Args:
-            inputs (np.ndarray): Array of shape (time_steps, num_sites, num_input_features)
-            outputs (np.ndarray): Array of shape (time_steps, num_sites, num_output_features)
-            sequence_length (int): Number of consecutive days for each sample.
+            inputs (np.ndarray): Array of shape (num_sites, time_steps, num_input_features)
+            outputs (np.ndarray): Array of shape (num_sites, time_steps, num_output_features)
+            days_per_year (int): Number of consecutive days for each year.
         """
         self.inputs = inputs
         self.outputs = outputs
-        self.sequence_length = sequence_length
+        self.sequence_length = days_per_year
         
         self.samples = []
         num_sites = inputs.shape[0]
@@ -41,8 +41,8 @@ class SequenceDataset(Dataset):
             site_input = inputs[site] # Shape [total_days, input_features]
             # site_output = outputs[site] # Shape [total_days, input_features]
             
-            for start in range(0,len(site_input), sequence_length):
-                end = start + sequence_length
+            for start in range(0,len(site_input), self.sequence_length):
+                end = start + self.sequence_length
                 if end > len(site_input):
                     break  # Discard incomplete sequences
                 else:
@@ -84,9 +84,15 @@ class TimeSeriesModel(nn.Module):
         self.epochs_no_improve = 0
 
 
-    def train_test_split(self,X, Y, total_years,train_batch_size, split_method = 0):
+    def train_test_split(self,X, Y, total_years,train_batch_size, days_per_year:int = 365, split_method:int = 0):
+        '''
+        split_method: int
+            0: choose the last two years  
+            1: randomly pick two sites
+
+        '''
         # total_years = 18
-        days_per_year = 365
+        
         # total_days = total_years * days_per_year
         # num_sites = X.shape[0] #100
 
@@ -109,23 +115,35 @@ class TimeSeriesModel(nn.Module):
             # Y2_train = Y2[:,:train_years, :]
             # Y2_test = Y2[:, train_years:, :]
 
-        else:
-            pass # Add code later
+        else: # 1 Random pick two sites
+            site_num = X.shape[0]
+            site_random_list = np.random.choice(site_num, size=site_num, replace=False)
+
+            test_site_num = max(int(site_num * 0.2), 1)
+
+            train_site = site_random_list[:test_site_num]
+            test_site = site_random_list[test_site_num:]
+
+            X_train = X[train_site, :, :]
+            X_test = X[test_site, :, :]
+
+            Y_train = Y[train_site, :, :]
+            Y_test = Y[test_site, :, :]
 
         
         # Create Dataset objects for training and testing.
-        sequence_length = 365  # Must Use 365 whole year's days as a sample
+        sequence_length = days_per_year  # Must Use whole year's days as a sequence
 
         train_dataset = SequenceDataset(X_train, Y_train, sequence_length)
         test_dataset = SequenceDataset(X_test, Y_test, sequence_length)
 
         # Create DataLoaders.
         self.train_loader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=True)
-        self.test_loader  = DataLoader(test_dataset, batch_size=1, shuffle=False)
+        self.test_loader  = DataLoader(test_dataset, batch_size=1, shuffle=False) # Note: Test batch size is 1
 
         # return train_loader, test_loader
 
-    def train_model(self, loss_fun, LR=0.001,step_size=20, gamma=0.8, maxepoch=80):
+    def train_model(self, loss_fun, LR=0.001,step_size=20, gamma=0.8, maxepoch=80, use_y_mask = False):
 
         # Initial parameters
         self.train_losses = []
@@ -161,7 +179,14 @@ class TimeSeriesModel(nn.Module):
                 optimizer.zero_grad()
                 # outputs_pred = model(batch_x)  # shape: (batch_size, sequence_length, output_dim)
                 outputs_pred = self(batch_x)  # shape: (batch_size, sequence_length, output_dim)
-                loss = self.criterion(outputs_pred, batch_y)
+                if use_y_mask:
+                    y_mask = batch_y[..., 5:]
+                    y_true = batch_y[..., :5] * y_mask
+                    y_pred = outputs_pred * y_mask
+                    loss = self.criterion(y_pred, y_true)
+                else:
+                    loss = self.criterion(outputs_pred, batch_y)
+
                 loss.backward()
                 # Gradient clipping
                 # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -179,11 +204,18 @@ class TimeSeriesModel(nn.Module):
                 for batch_x, batch_y in self.test_loader:
                     batch_x = batch_x.to(self.device)
                     batch_y = batch_y.to(self.device)
-
-                    # outputs_pred = model(batch_x)
                     outputs_pred = self(batch_x)
-                    loss = self.criterion(outputs_pred, batch_y)
+
+                    if use_y_mask:
+                        y_mask = batch_y[..., 5:]
+                        y_true = batch_y[..., :5] * y_mask
+                        y_pred = outputs_pred * y_mask
+                        loss = self.criterion(y_pred, y_true)
+                    else:
+                        loss = self.criterion(outputs_pred, batch_y)
+                    
                     test_losses.append(loss.item())
+            
             avg_test_loss = np.mean(test_losses)
 
             # Step the scheduler after each epoch
@@ -208,7 +240,7 @@ class TimeSeriesModel(nn.Module):
             self.epochs = epoch+1
             print(f"Epoch {epoch+1}/{num_epochs} | LR: {scheduler.get_last_lr()[0]:.6f}, Train Loss: {avg_train_loss:.4f}, Test Loss: {avg_test_loss:.4f}")
 
-    def test(self):
+    def test(self, use_y_mask=False):
         # model = self.model
         # model.eval()
         self.eval()
@@ -229,12 +261,20 @@ class TimeSeriesModel(nn.Module):
                 outputs_pred = self(batch_x)
 
                 # Compute loss
-                loss = self.criterion(outputs_pred, batch_y)
+                if use_y_mask:
+                    y_mask = batch_y[..., 5:]
+                    y_true = batch_y[..., :5] * y_mask
+                    y_pred = outputs_pred * y_mask
+                else:
+                    y_true = outputs_pred
+                    y_pred = batch_y
+                
+                loss = self.criterion(y_pred, y_true)
                 test_losses.append(loss.item())
                 
-                # (Optional) Save predictions and targets for further analysis
-                all_predictions.append(outputs_pred.cpu())
-                all_targets.append(batch_y.cpu())
+                # Save predictions and targets for further analysis
+                all_predictions.append(y_pred.cpu())
+                all_targets.append(y_true.cpu())
 
         # Calculate the average test loss
         avg_test_loss = np.mean(test_losses)
@@ -264,12 +304,14 @@ class TimeSeriesModel(nn.Module):
         plt.grid(True)
         plt.show()
 
-    def Vis_prediction_result(self, y_scaler:list, features:list):
+    def Vis_prediction_result(self, y_scaler:list, features:list, site:int,year:int):
         y_param_num = self.all_targets.shape[-1]
-        all_predictions_flat = self.all_predictions.reshape(-1,y_param_num)
-        all_targets_flat = self.all_targets.reshape(-1,y_param_num)
+        # self.all_predictions shape is [200, 365, features]
+        _idx = site*2 + year
+        all_predictions_flat = self.all_predictions[_idx, :, :].reshape(-1,y_param_num)
+        all_targets_flat     = self.all_targets[_idx,:,:].reshape(-1,y_param_num)
         
-        N, F = all_targets_flat.shape
+        N, F = all_targets_flat.shape # N: 365, F: features number
 
         fig, axes = plt.subplots(F, 2, figsize=(12, 4*F))
 
@@ -307,7 +349,7 @@ class TimeSeriesModel(nn.Module):
                 f"Bias = {bias:.3f}"
             )
 
-            # Place text in the upper left in axes©\fraction coordinates
+            # Place text in the upper left in axes-fraction coordinates
             ax_scatter.text(
                 0.05, 0.95, stats_text,
                 transform= ax_scatter.transAxes,
@@ -325,6 +367,8 @@ class TimeSeriesModel(nn.Module):
             ax_scatter.set_ylim(mn, mx)
 
         # Tighten up and show
+        sub_title = f"Site {site} Year {year}"
+        plt.suptitle(sub_title, fontsize=12)
         plt.tight_layout()
         plt.show()
 
