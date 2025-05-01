@@ -144,15 +144,15 @@ class TimeSeriesModel(nn.Module):
         # return train_loader, test_loader
 
     def train_model(self, loss_fun, LR=0.001,step_size=20, gamma=0.8, maxepoch=80, use_y_mask = False):
-
         # Initial parameters
         self.train_losses = []
         self.val_losses = []
         self.epochs = 0
 
+        y_num = self.output_dim  # output features number
+
         self.to(self.device)
         self.criterion = loss_fun # nn.L1Loss() # nn.MSELoss() # For regression
-        # optimizer = optim.Adam(model.parameters(), lr=LR)
         optimizer = optim.Adam(self.parameters(), lr=LR)
 
         num_epochs = maxepoch  # Adjust as needed
@@ -180,8 +180,8 @@ class TimeSeriesModel(nn.Module):
                 # outputs_pred = model(batch_x)  # shape: (batch_size, sequence_length, output_dim)
                 outputs_pred = self(batch_x)  # shape: (batch_size, sequence_length, output_dim)
                 if use_y_mask:
-                    y_mask = batch_y[..., 5:]
-                    y_true = batch_y[..., :5] * y_mask
+                    y_mask = batch_y[..., y_num:]
+                    y_true = batch_y[..., :y_num] * y_mask
                     y_pred = outputs_pred * y_mask
                     loss = self.criterion(y_pred, y_true)
                 else:
@@ -189,7 +189,6 @@ class TimeSeriesModel(nn.Module):
 
                 loss.backward()
                 # Gradient clipping
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
                 optimizer.step()
                 train_losses.append(loss.item())
@@ -197,7 +196,6 @@ class TimeSeriesModel(nn.Module):
             avg_train_loss = np.mean(train_losses)
 
             # Evaluate on the test set.
-            # model.eval()
             self.eval()
             test_losses = []
             with torch.no_grad():
@@ -207,8 +205,8 @@ class TimeSeriesModel(nn.Module):
                     outputs_pred = self(batch_x)
 
                     if use_y_mask:
-                        y_mask = batch_y[..., 5:]
-                        y_true = batch_y[..., :5] * y_mask
+                        y_mask = batch_y[..., y_num:]
+                        y_true = batch_y[..., :y_num] * y_mask
                         y_pred = outputs_pred * y_mask
                         loss = self.criterion(y_pred, y_true)
                     else:
@@ -224,14 +222,12 @@ class TimeSeriesModel(nn.Module):
             # Early stopping check
             if avg_test_loss < best_loss:
                 best_loss = avg_test_loss
-                # torch.save(model.state_dict(), checkpoint_path)
                 torch.save(self.state_dict(), checkpoint_path)
                 epochs_no_improve = 0
             else:
                 epochs_no_improve += 1
                 if epochs_no_improve >= patience and epoch >= 40:
                     print(f'\n#***# Early stopping triggered after {epoch+1} epochs!')
-                    # model.load_state_dict(torch.load(checkpoint_path))
                     self.load_state_dict(torch.load(checkpoint_path))
                     break
             
@@ -241,13 +237,13 @@ class TimeSeriesModel(nn.Module):
             print(f"Epoch {epoch+1}/{num_epochs} | LR: {scheduler.get_last_lr()[0]:.6f}, Train Loss: {avg_train_loss:.4f}, Test Loss: {avg_test_loss:.4f}")
 
     def test(self, use_y_mask=False):
-        # model = self.model
-        # model.eval()
         self.eval()
 
         test_losses = []
         all_predictions = []  # Optional: to store predictions for further analysis
         all_targets = []      # Optional: to store true targets
+
+        y_num= self.output_dim  # Output features number
         
         with torch.no_grad():
             for batch_x, batch_y in self.test_loader:
@@ -262,8 +258,8 @@ class TimeSeriesModel(nn.Module):
 
                 # Compute loss
                 if use_y_mask:
-                    y_mask = batch_y[..., 5:]
-                    y_true = batch_y[..., :5] * y_mask
+                    y_mask = batch_y[..., y_num:]
+                    y_true = batch_y[..., :y_num] * y_mask
                     y_pred = outputs_pred * y_mask
                 else:
                     y_true = outputs_pred
@@ -302,6 +298,99 @@ class TimeSeriesModel(nn.Module):
         plt.title('Training Progress')
         plt.legend()
         plt.grid(True)
+        plt.show()
+
+    # Select one site, one year in the test dataset
+    # To plot curves for comparing the prediction and true values
+    def Vis_plot_prediction_result_time_series(self, y_scaler:list, features:list, site:int,year:int):
+        y_param_num = self.all_targets.shape[-1]
+        # self.all_predictions shape is [200, 365, features]
+        _idx = site*2 + year
+        all_predictions_flat = self.all_predictions[_idx, :, :].reshape(-1,y_param_num)
+        all_targets_flat     = self.all_targets[_idx,:,:].reshape(-1,y_param_num)
+        
+        N, F = all_targets_flat.shape # N: 365, F: features number
+
+        fig, axes = plt.subplots(F, 1, figsize=(12, 4*F))
+
+        for i, name in enumerate(features):
+            ax_line = axes[i]
+
+            y_true = Z_norm_reverse(all_targets_flat[:,i], y_scaler[i]).numpy()
+            y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i]).numpy()
+            
+            # LINE PLOT: Days index vs. values
+            ax_line.plot(np.arange(N), y_true, label='True', color='steelblue', lw=1)
+            ax_line.plot(np.arange(N), y_pred, label='Pred', color='red',lw=1, alpha=0.7)
+            ax_line.set_title(f"{name} over Days")
+            ax_line.set_xlabel("Days Index")
+            ax_line.set_ylabel(name)
+            ax_line.legend(fontsize=8)
+
+        # Tighten up and show
+        sub_title = f"Site {site} Year {year}"
+        fig.suptitle(sub_title, fontsize=12)
+        fig.subplots_adjust(top=0.9, hspace=0.4)
+        plt.show()
+
+    # Scatter the prediction value and true values base on test dataset
+    def Vis_scatter_prediction_result(self, y_scaler:list, features:list):
+        y_param_num = self.all_targets.shape[-1]
+        # self.all_predictions shape is [200, 365, features]
+
+        all_predictions_flat = self.all_predictions.reshape(-1,y_param_num)
+        all_targets_flat     = self.all_targets.reshape(-1,y_param_num)
+        
+        N, F = all_targets_flat.shape # N: 365, F: features number
+
+        fig, axes = plt.subplots(F, 1, figsize=(12, 4*F))
+
+        for i, name in enumerate(features):
+            ax_scatter = axes[i]
+            y_true = Z_norm_reverse(all_targets_flat[:,i], y_scaler[i]).numpy()
+            y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i]).numpy()
+
+            # SCATTER PLOT: true vs. pred
+            mn = min(y_true.min(), y_pred.min())
+            mx = max(y_true.max(), y_pred.max())
+
+            m, b, r_value, p_value, std_err = stats.linregress(y_true, y_pred) #r,p,std
+            ax_scatter.plot(y_pred, m*y_pred + b,color='red',lw=1.0)
+            ax_scatter.plot([mn, mx], [mn, mx],color='steelblue',linestyle='--')
+
+            # Compute metrics
+            r2   = r2_score(y_true, y_pred)
+            rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+            bias = np.mean(y_pred - y_true)
+
+            # Format text
+            stats_text = (
+                f"$R^2$ = {r2:.3f}\n"
+                f"RMSE = {rmse:.3f}\n"
+                f"Bias = {bias:.3f}"
+            )
+
+            # Place text in the upper left in axes-fraction coordinates
+            ax_scatter.text(
+                0.05, 0.95, stats_text,
+                transform= ax_scatter.transAxes,
+                fontsize=10,
+                verticalalignment='top',
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.7)
+            )
+
+            ax_scatter.scatter(y_true, y_pred, alpha=0.4, s=10)
+            # ax_scatter.plot([mn, mx], [mn, mx], 'k--', lw=1)
+            ax_scatter.set_title(f"{name}: True vs. Predicted")
+            ax_scatter.set_xlabel("True Value")
+            ax_scatter.set_ylabel("Predicted Value")
+            ax_scatter.set_xlim(mn, mx)
+            ax_scatter.set_ylim(mn, mx)
+
+        # Tighten up and show
+        sub_title = "True vs Prediction Values"
+        fig.suptitle(sub_title, fontsize=12)
+        fig.subplots_adjust(top=0.9, hspace=0.4)
         plt.show()
 
     def Vis_prediction_result(self, y_scaler:list, features:list, site:int,year:int):
