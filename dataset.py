@@ -2,6 +2,8 @@ import os
 import torch
 import numpy as np
 import kgml_lib
+import matplotlib.pyplot as plt
+import math
 
 # define functions from kgml_lib
 Z_norm = kgml_lib.Z_norm 
@@ -649,3 +651,39 @@ class N2O_mesocosm_dataset:
         self.aug_Y_train_d_mask = Y_train_d_mask
         self.aug_Y_train_gt_1stind = Y_val_gt_1stind
         self.aug_Y_val_gt_1stind = Y_val_gt_1stind
+
+def plot_features(data, feature_number, feature_name, sub_title):
+    n_features = feature_number 
+    
+    n_cols = 4
+    n_rows = math.ceil(n_features / n_cols)
+    
+    fig = plt.figure(figsize=(4 * n_cols, 3 * n_rows))
+    # plt.figure(figsize=(15, 10))
+    # plt.title('Scaled Input features')
+    # Loop through each feature and create a histogram subplot
+    for i in range(n_features):
+        plt.subplot(n_rows, n_cols, i+1)  # Adjust grid (3 rows, 4 columns) as needed
+        plt.hist(data[:, i], bins=30, edgecolor='black', alpha=0.7)
+        # plt.title(f'Feature {i+1}')
+        _f_name = feature_name[i] 
+        plt.title(_f_name)
+        # plt.xlabel(_f_name)
+        plt.ylabel('Frequency')
+    
+    # plt.tight_layout()
+    # Add a main title for all subplots
+    # Set a suptitle with a lower y value to bring it closer to subplots
+    # positions the overall title at 92% of the figure height (you can try lowering this value further if needed).
+    # plt.suptitle("Distribution of Scaled Features", fontsize=16, y=0.95)
+    plt.suptitle(sub_title, fontsize=16)
+    
+    # Adjust subplots: increase the 'top' value to reduce the gap between the title and subplots.
+    # plt.subplots_adjust(top=0.92, hspace=0.5)
+    
+    # Adjust the vertical space between rows (hspace)
+    # plt.subplots_adjust(hspace=0.4)  # Increase or decrease 0.5 as needed
+
+    # Reserve space at the top (e.g., 5% margin) so the suptitle doesn't overlap
+    plt.tight_layout(rect=[0, 0, 1, 0.93])
+    plt.show()
