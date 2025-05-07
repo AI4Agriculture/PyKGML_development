@@ -540,3 +540,127 @@ class LSTMSeq2Seq(TimeSeriesModel):
         out = self.fc(lstm_out)     # out shape: (batch_size, sequence_length, output_dim)
         return out
     
+### 1D CNN Regression models
+
+# ==============================
+# 1D CNN Model, Time series regression
+# ==============================
+class TemporalCNN(TimeSeriesModel):
+    def __init__(self, input_dim, hidden_dim, num_layers, output_dim, dropout=0.2):
+        super().__init__(input_dim, hidden_dim, num_layers, output_dim, dropout)
+        # Assume seq_len is 365
+        self.cnn = nn.Sequential(
+            # Block 1: Output is (batch_size, 32, seq_len)
+            nn.Conv1d(input_dim, 32, kernel_size=5, padding='same'),
+            nn.BatchNorm1d(32),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            
+            # Block 2: Output is (batch_size, 64, seq_len)
+            nn.Conv1d(32, 64, kernel_size=3, padding='same'),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            
+            # Block 3: Output is (batch_size, 3, seq_len)
+            nn.Conv1d(64, output_dim, kernel_size=1)
+        )
+
+    def forward(self, x):
+        # CNN requires dimmesion as: (batch, channels, seq)
+        x = x.permute(0, 2, 1)  # -> (batch, input_features, 365)
+        out = self.cnn(x)          # (batch, 3, 365)
+        return out.permute(0, 2, 1)  # change back to (batch, 365, 3)
+    
+class CNNLSTM(TimeSeriesModel):
+    def __init__(self, input_dim, hidden_dim, num_layers, output_dim, dropout=0.2):
+        super().__init__(input_dim, hidden_dim, num_layers, output_dim, dropout)
+        
+        # 1D CNN Block: Extract local time series features
+        self.cnn = nn.Sequential(
+            nn.Conv1d(input_dim, 64, kernel_size=5, padding='same'),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            
+            nn.Conv1d(64, 128, kernel_size=3, padding='same'),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+        
+        # LSTM Block: Extract long time features
+        self.lstm = nn.LSTM(
+            input_size=128,   # input dim = CNN output channels
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            bidirectional=True,
+            batch_first=True  # output is (batch, seq, features)
+        )
+        
+        # FC layer
+        self.fc = nn.Sequential(
+            nn.Linear(hidden_dim*2, 128),  # bi-direction LSTM *2
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(128, output_dim)
+        )
+
+    def forward(self, x):
+        # Origin x shape is: (batch_size, 365, input_features)
+        # Change shape for Conv1d: (batch, channels, seq=365)
+        x = x.permute(0, 2, 1)  # -> (batch, input_features, 365)
+        
+        # 1D CNN
+        cnn_out = self.cnn(x)  # (batch, 128, 365)
+        
+        # change shape for LSTM: (batch, seq, features)
+        lstm_input = cnn_out.permute(0, 2, 1)  # -> (batch, 365, 128)
+        
+        # LSTM
+        lstm_out, _ = self.lstm(lstm_input)  # (batch, 365, 512)  (bi-direction, hidden_size*2)
+        
+        # FC layer
+        output = self.fc(lstm_out)  # (batch, 365, 3)
+        return output
+    
+class CNN_LSTM_Attension(CNNLSTM):
+    def __init__(self, input_dim, hidden_dim, num_layers, output_dim, dropout=0.2,attn_heads=8, attn_dropout=0.1):
+        super().__init__(input_dim, hidden_dim, num_layers, output_dim, dropout)
+        # Attension block after LSTM
+        embed_size = self.lstm.hidden_size*2
+        self.attention = nn.MultiheadAttention(embed_dim=embed_size, 
+                                               num_heads=attn_heads,
+                                               dropout=attn_dropout,
+                                                batch_first=True)
+
+        # LayerNorm after the Attension
+        self.norm = nn.LayerNorm(embed_size)
+
+    def forward(self, x):
+        # Input x shape: (batch_size, 365, 16)
+        # Change shape for Conv1d: (batch, channels, seq)
+        x = x.permute(0, 2, 1)  # -> (batch, 16, 365)
+        
+        # 1D CNN
+        cnn_out = self.cnn(x)  # (batch, 128, 365)
+        
+        # Change shape for LSTM: (batch, seq, features)
+        lstm_input = cnn_out.permute(0, 2, 1)  # -> (batch, 365, 128)
+        
+        # LSTM
+        lstm_out, _ = self.lstm(lstm_input)  # (batch, 365, 512)  (bi-direction hidden_size*2)
+
+        # Attension
+        attn_out, _ = self.attention(
+            query=lstm_out,
+            key=lstm_out,
+            value=lstm_out,
+            need_weights=False
+        )
+
+        attn_out = self.norm(attn_out + lstm_out)  # Residual connection
+
+        # FC layer
+        output = self.fc(attn_out)  # (batch, 365, 3)
+        return output
