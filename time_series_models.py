@@ -143,6 +143,20 @@ class TimeSeriesModel(nn.Module):
 
         # return train_loader, test_loader
 
+    def load_pretrained(self, model, pretrained_model_path=None):
+        #output 4 in first module and 1 in second module
+        checkpoint = torch.load(pretrained_model_path, weights_only=False, map_location=torch.device('mps'))
+        model.load_state_dict(checkpoint['model_state_dict'])
+        
+        print(self.model)
+        params = list(self.model.parameters())
+        print(len(params))
+        print(params[5].size())  # conv1's .weight
+        print("Model's state_dict:")
+        for param_tensor in self.model.state_dict():
+            print(param_tensor, "\t", self.model.state_dict()[param_tensor].size())
+
+
     def train_model(self, loss_fun, LR=0.001,step_size=20, gamma=0.8, maxepoch=80, use_y_mask = False):
         # Initial parameters
         self.train_losses = []
@@ -166,7 +180,7 @@ class TimeSeriesModel(nn.Module):
         checkpoint_path='best_GRU_model.pth'
 
         # StepLR scheduler 
-        scheduler = StepLR(optimizer, step_size= step_size, gamma= gamma)
+        scheduler = StepLR(optimizer, step_size=step_size, gamma=gamma)
 
         for epoch in range(num_epochs):
             # model.train()
@@ -320,7 +334,7 @@ class TimeSeriesModel(nn.Module):
             y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i]).numpy()
             
             # LINE PLOT: Days index vs. values
-            ax_line.plot(np.arange(N), y_true, label='True', color='steelblue', lw=1)
+            ax_line.plot(np.arange(N), y_true, 'o', label='True', color='steelblue', lw=1)
             ax_line.plot(np.arange(N), y_pred, label='Pred', color='red',lw=1, alpha=0.7)
             ax_line.set_title(f"{name} over Days")
             ax_line.set_xlabel("Days Index")
@@ -332,6 +346,41 @@ class TimeSeriesModel(nn.Module):
         fig.suptitle(sub_title, fontsize=12)
         fig.subplots_adjust(top=0.9, hspace=0.4)
         plt.show()
+
+    def Vis_plot_prediction_result_time_series_masked(self, y_scaler:list, features:list, site:int,year:int, obs_mask:np.ndarray=None):
+            y_param_num = self.all_targets.shape[-1]
+            # self.all_predictions shape is [200, 365, features]
+            _idx = site*2 + year
+            predictions_flat = self.all_predictions[_idx, :, :].reshape(-1,y_param_num)
+            targets_flat     = self.all_targets[_idx,:,:].reshape(-1,y_param_num)
+            mask = obs_mask.reshape(self.all_targets.shape)[_idx,:,:].reshape(-1,y_param_num)
+            N, F = targets_flat.shape # N: 365, F: features number
+
+            fig, axes = plt.subplots(F, 1, figsize=(12, 4*F))
+
+            for i, name in enumerate(features):
+                ax_line = axes[i]
+
+                y_true = Z_norm_reverse(targets_flat[:,i], y_scaler[i]).numpy()
+                y_pred = Z_norm_reverse(predictions_flat[:,i], y_scaler[i]).numpy()
+                if mask is not None or mask.size != 0:
+                    y_mask = mask.reshape(-1, mask.shape[-1])[:,i]
+                    y_true = np.where(y_mask == 0, np.nan, y_true)
+                
+                # LINE PLOT: Days index vs. values
+                ax_line.plot(np.arange(N), y_true, 'o', label='True', color='steelblue', lw=1)
+                ax_line.plot(np.arange(N), y_pred, label='Pred', color='red',lw=1, alpha=0.7)
+                ax_line.set_title(f"{name} over Days")
+                ax_line.set_xlabel("Days Index")
+                ax_line.set_ylabel(name)
+                ax_line.legend(fontsize=8)
+
+            # Tighten up and show
+            sub_title = f"Site {site} Year {year}"
+            fig.suptitle(sub_title, fontsize=12)
+            fig.subplots_adjust(top=0.9, hspace=0.4)
+            plt.show()
+            
 
     # Scatter the prediction value and true values base on test dataset
     def Vis_scatter_prediction_result(self, y_scaler:list, features:list):
@@ -540,3 +589,282 @@ class LSTMSeq2Seq(TimeSeriesModel):
         out = self.fc(lstm_out)     # out shape: (batch_size, sequence_length, output_dim)
         return out
     
+    
+### 1D CNN Regression models
+
+# ==============================
+# 1D CNN Model, Time series regression
+# ==============================
+class TemporalCNN(TimeSeriesModel):
+    def __init__(self, input_dim, hidden_dim, num_layers, output_dim, dropout=0.2):
+        super().__init__(input_dim, hidden_dim, num_layers, output_dim, dropout)
+        # Assume seq_len is 365
+        self.cnn = nn.Sequential(
+            # Block 1: Output is (batch_size, 32, seq_len)
+            nn.Conv1d(input_dim, 32, kernel_size=5, padding='same'),
+            nn.BatchNorm1d(32),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            
+            # Block 2: Output is (batch_size, 64, seq_len)
+            nn.Conv1d(32, 64, kernel_size=3, padding='same'),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            
+            # Block 3: Output is (batch_size, 3, seq_len)
+            nn.Conv1d(64, output_dim, kernel_size=1)
+        )
+
+    def forward(self, x):
+        # CNN requires dimmesion as: (batch, channels, seq)
+        x = x.permute(0, 2, 1)  # -> (batch, input_features, 365)
+        out = self.cnn(x)          # (batch, 3, 365)
+        return out.permute(0, 2, 1)  # change back to (batch, 365, 3)
+    
+class CNNLSTM(TimeSeriesModel):
+    def __init__(self, input_dim, hidden_dim, num_layers, output_dim, dropout=0.2):
+        super().__init__(input_dim, hidden_dim, num_layers, output_dim, dropout)
+        
+        # 1D CNN Block: Extract local time series features
+        self.cnn = nn.Sequential(
+            nn.Conv1d(input_dim, 64, kernel_size=5, padding='same'),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            
+            nn.Conv1d(64, 128, kernel_size=3, padding='same'),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+        
+        # LSTM Block: Extract long time features
+        self.lstm = nn.LSTM(
+            input_size=128,   # input dim = CNN output channels
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            bidirectional=True,
+            batch_first=True  # output is (batch, seq, features)
+        )
+        
+        # FC layer
+        self.fc = nn.Sequential(
+            nn.Linear(hidden_dim*2, 128),  # bi-direction LSTM *2
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(128, output_dim)
+        )
+
+    def forward(self, x):
+        # Origin x shape is: (batch_size, 365, input_features)
+        # Change shape for Conv1d: (batch, channels, seq=365)
+        x = x.permute(0, 2, 1)  # -> (batch, input_features, 365)
+        
+        # 1D CNN
+        cnn_out = self.cnn(x)  # (batch, 128, 365)
+        
+        # change shape for LSTM: (batch, seq, features)
+        lstm_input = cnn_out.permute(0, 2, 1)  # -> (batch, 365, 128)
+        
+        # LSTM
+        lstm_out, _ = self.lstm(lstm_input)  # (batch, 365, 512)  (bi-direction, hidden_size*2)
+        
+        # FC layer
+        output = self.fc(lstm_out)  # (batch, 365, 3)
+        return output
+    
+class CNN_LSTM_Attension(CNNLSTM):
+    def __init__(self, input_dim, hidden_dim, num_layers, output_dim, dropout=0.2,attn_heads=8, attn_dropout=0.1):
+        super().__init__(input_dim, hidden_dim, num_layers, output_dim, dropout)
+        # Attension block after LSTM
+        embed_size = self.lstm.hidden_size*2
+        self.attention = nn.MultiheadAttention(embed_dim=embed_size, 
+                                               num_heads=attn_heads,
+                                               dropout=attn_dropout,
+                                                batch_first=True)
+
+        # LayerNorm after the Attension
+        self.norm = nn.LayerNorm(embed_size)
+
+    def forward(self, x):
+        # Input x shape: (batch_size, 365, 16)
+        # Change shape for Conv1d: (batch, channels, seq)
+        x = x.permute(0, 2, 1)  # -> (batch, 16, 365)
+        
+        # 1D CNN
+        cnn_out = self.cnn(x)  # (batch, 128, 365)
+        
+        # Change shape for LSTM: (batch, seq, features)
+        lstm_input = cnn_out.permute(0, 2, 1)  # -> (batch, 365, 128)
+        
+        # LSTM
+        lstm_out, _ = self.lstm(lstm_input)  # (batch, 365, 512)  (bi-direction hidden_size*2)
+
+        # Attension
+        attn_out, _ = self.attention(
+            query=lstm_out,
+            key=lstm_out,
+            value=lstm_out,
+            need_weights=False
+        )
+
+        attn_out = self.norm(attn_out + lstm_out)  # Residual connection
+
+        # FC layer
+        output = self.fc(attn_out)  # (batch, 365, 3)
+        return output
+    
+
+        
+# the 2-cell N2O KGML model from Licheng's 2022 paper
+class N2OGRU_KGML(TimeSeriesModel):
+    #input model variables are for each module
+    def __init__(self, input_dim, hidden_dim, num_layers, output_dim1, output_dim2, dropout):
+        super().__init__(input_dim, hidden_dim, num_layers, output_dim=output_dim1+output_dim2)
+        if num_layers > 1:
+            self.gru1 = nn.GRU(input_dim, hidden_dim, num_layers, dropout=dropout, batch_first=True)
+            self.gru2 = nn.GRU(input_dim+output_dim1, hidden_dim, num_layers, dropout=dropout, batch_first=True)
+        else:
+            self.gru1 = nn.GRU(input_dim, hidden_dim, num_layers, batch_first=True)
+            self.gru2 = nn.GRU(input_dim+output_dim1, hidden_dim, num_layers, batch_first=True)
+        self.densor1 = nn.Linear(hidden_dim, output_dim1)
+        self.densor2 = nn.Linear(hidden_dim, output_dim2)
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+        self.drop=nn.Dropout(dropout)
+        self.init_weights()
+
+    def init_weights(self):
+        initrange = 0.1 #may change to a small value
+        self.densor1.bias.data.zero_()
+        self.densor1.weight.data.uniform_(-initrange, initrange)
+        self.densor2.bias.data.zero_()
+        self.densor2.weight.data.uniform_(-initrange, initrange)
+
+    def forward(self, inputs, hidden=None):
+        if hidden is None:
+            hidden = self.init_hidden(inputs.size(0))
+    
+        output1, hidden1 = self.gru1(inputs, hidden[0])
+        output1 = self.densor1(self.drop(output1)) 
+        inputs = torch.cat((inputs,output1),2)
+        output2, hidden2 = self.gru2(inputs, hidden[1])
+        output2 = self.densor2(self.drop(output2)) 
+        #need to be careful what is the output orders!!!!!!!!!!!!!
+        output=torch.cat((output2,output1),2)
+        hidden=(hidden1,hidden2)
+        return output, hidden
+
+    def init_hidden(self, bsz):
+        weight = next(self.parameters())
+        return (weight.new_zeros(self.num_layers, bsz, self.hidden_dim),\
+                weight.new_zeros(self.num_layers, bsz, self.hidden_dim))
+
+
+# the Ra-Rh CO2 KGML model from Licheng's 2024 paper
+class RecoGRU_KGML(TimeSeriesModel):
+    def __init__(self, input_dim, hidden_dim, num_layers, output_dim, dropout):
+        super().__init__(input_dim, hidden_dim, num_layers, output_dim)
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+        # self.GPP_scaler = GPP_scaler
+        # self.Ra_scaler = Ra_scaler
+        # self.Yield_scaler = Yield_scaler
+        # self.Res_scaler = Res_scaler
+        # sequence_length = self.sequence_length
+        self.gru_basic = nn.GRU(input_dim,hidden_dim,2,dropout=dropout, batch_first=True)
+        self.gru_Ra = nn.GRU(input_dim+hidden_dim, hidden_dim,1,batch_first=True)
+        self.gru_Rh = nn.GRU(input_dim+hidden_dim+1, hidden_dim,2,dropout=dropout, batch_first=True)#+1 means res ini 
+        self.gru_NEE = nn.GRU(input_dim+2, hidden_dim,1, batch_first=True)#+2 Ra and Rh
+        self.drop=nn.Dropout(dropout)
+        self.densor_Ra = nn.Linear(hidden_dim, 1)
+        self.densor_Rh = nn.Linear(hidden_dim, 1)
+        self.densor_NEE = nn.Linear(hidden_dim, 1)
+        #attn for yield prediction
+        self.attn = nn.Sequential(
+            nn.Linear(hidden_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 1),
+            nn.Tanh()
+        )
+        self.densor_yield = nn.Sequential(
+            nn.Linear(hidden_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 1)
+        )
+        self.ReLU=nn.ReLU()
+        self.init_weights()
+
+    def init_weights(self):
+        initrange = 0.1 #may change to a small value
+        self.densor_Ra.bias.data.zero_()
+        self.densor_Ra.weight.data.uniform_(-initrange, initrange)
+        self.densor_Rh.bias.data.zero_()
+        self.densor_Rh.weight.data.uniform_(-initrange, initrange)
+        self.densor_NEE.bias.data.zero_()
+        self.densor_NEE.weight.data.uniform_(-initrange, initrange)
+        for ii in range(4):
+            self.attn[ii*2].bias.data.zero_()
+            self.attn[ii*2].weight.data.uniform_(-initrange, initrange)
+            self.densor_yield[ii*2].bias.data.zero_()
+            self.densor_yield[ii*2].weight.data.uniform_(-initrange, initrange)
+        
+
+    def forward(self, inputs, hidden=None):
+        if hidden is None:
+            hidden = self.init_hidden(inputs.size(0))
+    
+        output, hidden1 = self.gru_basic(inputs, hidden[0])
+        #predict yield
+        inputs2 = self.drop(output)
+        attn_weights = F.softmax(self.attn(inputs2), dim=1).view(inputs.size(0),1,inputs.size(1))
+        inputs2 = torch.bmm(attn_weights,inputs2)
+        output2 = self.densor_yield(inputs2)
+        
+        #predict flux
+        #Ra
+        output1 , hidden2 = self.gru_Ra(torch.cat((self.drop(output),inputs), 2), hidden[1])
+        Ra = self.densor_Ra(self.drop(output1))
+        
+        #Rh
+        #caculate annual Res
+        #Annual GPP+ Annual Ra - Yield, GPP is no.8 inputs
+        # annual_GPP = torch.sum(Z_norm_reverse(inputs[:,:,8],self.GPP_scaler),dim=1).view(-1,1,1)
+        # annual_Ra = torch.sum(Z_norm_reverse(Ra[:,:,0],self.Ra_scaler),dim=1).view(-1,1,1)
+        # annual_Yield = Z_norm_reverse(output2[:,0,0],self.Yield_scaler).view(-1,1,1)
+        # #control 0< Res_ini < GPP
+        # Res_ini = self.ReLU(annual_GPP+annual_Ra - annual_Yield)
+        # #Res_ini[Res_ini > annual_GPP].data = annual_GPP[Res_ini > annual_GPP].data 
+        # #scale Res_ini
+        # Res_ini = Z_norm_with_scaler(Res_ini,self.Res_scaler)
+        # ##calculate Rh now with current year res
+        # Res = Res_ini.repeat(1, self.sequence_length, 1)
+        # #left day 300
+        # Res[:,0:298,:] = 0.0
+        # Res[:,300:,:] = 0.0
+        # output1, hidden3  = self.gru_Rh(torch.cat((Res,self.drop(output),inputs), 2), hidden[2])
+        output1, hidden3  = self.gru_Rh(torch.cat((self.drop(output),inputs), 2), hidden[2])
+        Rh = self.densor_Rh(self.drop(output1))
+        
+        #NEE
+        output1, hidden4 = self.gru_NEE(torch.cat((Ra,Rh,inputs), 2), hidden[3])
+        NEE = self.densor_NEE(self.drop(output1))
+        output1 = torch.cat((Ra,Rh,NEE),2)
+        
+        return output1, output2, (hidden1,hidden2,hidden3,hidden4)
+
+    def init_hidden(self, bsz):
+        weight = next(self.parameters())
+        return (weight.new_zeros(2, bsz, self.hidden_dim),
+                weight.new_zeros(1, bsz, self.hidden_dim),
+                weight.new_zeros(2, bsz, self.hidden_dim),
+                weight.new_zeros(1, bsz, self.hidden_dim))

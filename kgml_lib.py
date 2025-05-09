@@ -38,6 +38,23 @@ class R2Loss_mul(nn.Module):
 
         r2 = 1.0 - (mse_loss / var_y)  # Compute R^2 per feature
         return torch.mean(r2, dim=0)
+
+
+def multiTaskWeighted_Loss(output, target, loss_weights):
+    if not loss_weights:
+        loss_weights = [1.0] * output
+    mse_loss = nn.MSELoss(reduction='mean')  # Mean squared error
+    total_loss = 0.0
+    losses = []
+
+    nout = output.size(2)  # Number of output features
+    for i in range(nout):
+        individual_loss = mse_loss(output[:, :, i], target[:, :, i])  # Compute MSE for each output
+        weighted_loss = loss_weights[i] * individual_loss  # Apply weight
+        total_loss += weighted_loss  # Sum up weighted losses
+        losses.append(weighted_loss.item())  # Store individual loss values
+
+    return total_loss, losses
     
 def get_gpu_memory():
   _output_to_list = lambda x: x.decode('ascii').split('\n')[:-1]
