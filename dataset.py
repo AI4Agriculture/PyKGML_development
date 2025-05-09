@@ -19,7 +19,7 @@ Get_Ra_Rh_org = kgml_lib.Get_Ra_Rh_org
 check_Rh_response_v2 = kgml_lib.check_Rh_response_v2
 sample_data_FN = kgml_lib.sample_data_FN
 
-class Step2_DataSet:
+class CO2_synthetic_dataset:
     '''
     data_path: input data directory
     input_data: input dataset file name
@@ -150,7 +150,7 @@ class Step2_DataSet:
         self.GPP_Res_fmean = GPP_Res_fmean
         self.Res_scaler = Res_scaler
 
-class Step5_DataSet:
+class CO2_fluxtower_dataset:
     '''
     data_path: input data directory
     input_data: input dataset file name
@@ -337,7 +337,7 @@ class N2O_synthetic_dataset:
         print('data size is ', self.data.size())
     
     def prepare_data(self):
-        if not self.scalers:
+        if self.scalers is None or self.scalers.size == 0:
             self.scalers = np.zeros((self.data.shape[-1], 2))
             for i in range(self.data.shape[-1]):
                 self.data[:,:,i], self.scalers[i, 0], self.scalers[i, 1] = Z_norm(self.data[:,:,i])
