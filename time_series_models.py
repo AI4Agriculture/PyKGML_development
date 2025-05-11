@@ -18,7 +18,7 @@ def Z_norm_reverse(X,Xscaler,units_convert=1.0):
 def Z_norm_with_scaler(X,Xscaler):
     return (X-Xscaler[0])/Xscaler[1]
 
-def plot_result(y_scaler:list, features:list, all_predictions_flat:list,all_targets_flat:list, site:int, year:int):
+def plot_result(y_scaler:list, features:list, all_predictions_flat:list,all_targets_flat:list, site:int, year:int, sub_title:str=None):
 
     N, F = all_targets_flat.shape # N: 365, F: features number
 
@@ -43,12 +43,13 @@ def plot_result(y_scaler:list, features:list, all_predictions_flat:list,all_targ
         ax_line.legend(fontsize=8)
 
     # Tighten up and show
-    sub_title = f"Site {site} Year {year}"
+    if sub_title is None:
+        sub_title = f"Site {site} Year {year}"
     fig.suptitle(sub_title, fontsize=12)
     fig.subplots_adjust(top=0.9, hspace=0.4)
     plt.show()
 
-def scatter_result(y_scaler:list, features:list, all_predictions_flat, all_targets_flat):
+def scatter_result(y_scaler:list, features:list, all_predictions_flat, all_targets_flat,sub_title:str=None):
 
     N, F = all_targets_flat.shape # N: 365, F: features number
 
@@ -102,7 +103,8 @@ def scatter_result(y_scaler:list, features:list, all_predictions_flat, all_targe
         ax_scatter.set_ylim(mn, mx)
 
     # Tighten up and show
-    sub_title = "True vs Prediction Values"
+    if sub_title is None:
+        sub_title = "True vs Prediction Values"
     fig.suptitle(sub_title, fontsize=12)
     fig.subplots_adjust(top=0.9, hspace=0.4)
     plt.show()
@@ -459,6 +461,7 @@ class TimeSeriesModel(nn.Module):
         
         scatter_result(y_scaler, features, all_predictions_flat, all_targets_flat)
 
+
 # A GRU with Attension Regression Model
 class Attention(nn.Module):
     def __init__(self, hidden_dim):
@@ -537,7 +540,6 @@ class LSTMSeq2Seq(TimeSeriesModel):
         lstm_out, _ = self.lstm(x)  # lstm_out shape: (batch_size, sequence_length, hidden_dim)
         out = self.fc(lstm_out)     # out shape: (batch_size, sequence_length, output_dim)
         return out
-    
     
 ### 1D CNN Regression models
 
