@@ -1,5 +1,6 @@
 from typing import Tuple
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,7 +10,8 @@ from torch.utils.data import Dataset, DataLoader
 # from sequence_dataset import SequenceDataset, train_test_split
 
 import matplotlib.pyplot as plt
-from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 import scipy.stats as stats
 
 def Z_norm_reverse(X,Xscaler,units_convert=1.0):
@@ -44,8 +46,10 @@ def plot_result(y_scaler:list, features:list, all_predictions_flat:list,all_targ
 
     # Tighten up and show
     if sub_title is None:
-        sub_title = f"Site {site} Year {year}"
-    fig.suptitle(sub_title, fontsize=12)
+        full_title = f"Site {site} Year {year}"
+    else:
+        full_title = f"{sub_title} Site {site} Year {year}"
+    fig.suptitle(full_title, fontsize=12)
     fig.subplots_adjust(top=0.9, hspace=0.4)
     plt.show()
 
@@ -104,10 +108,90 @@ def scatter_result(y_scaler:list, features:list, all_predictions_flat, all_targe
 
     # Tighten up and show
     if sub_title is None:
-        sub_title = "True vs Prediction Values"
-    fig.suptitle(sub_title, fontsize=12)
+        full_title = "True vs Prediction Values"
+    else:
+        full_title = f"{sub_title} True vs Prediction Values"
+    fig.suptitle(full_title, fontsize=12)
     fig.subplots_adjust(top=0.9, hspace=0.4)
     plt.show()
+
+''' Begin for Machine Learning Models. Those functions are for easy to train, test, and Visualiztion '''
+
+def ML_train_and_test(regressors:dict, X_train, X_test, y_train, y_test, output_features:list):
+    mean_scores = {}
+    feature_scores = []
+    prediction_results = dict()
+    prediction_results['Ground Truth'] = y_test
+
+    p_result = list()
+    # Loop, fit, predict, score ---
+    for name, reg in regressors.items():
+        # if multi‐output, wrap in MultiOutputRegressor
+        print(name)
+        _p_result = dict()
+        model = MultiOutputRegressor(reg)
+        # train
+        model.fit(X_train, y_train)
+        # predict
+        y_pred = model.predict(X_test)
+        _p_result[name] = y_pred
+        p_result.append(_p_result)
+        # metrics
+        r2   = r2_score(y_test, y_pred, multioutput="uniform_average")
+        rmse = mean_squared_error(y_test, y_pred, multioutput="uniform_average")
+        mae  = mean_absolute_error(y_test, y_pred, multioutput="uniform_average")
+        mean_scores[name] = (r2, rmse, mae)
+
+        for idx,feature_name in enumerate(output_features):
+            scores = dict()
+            r2 = r2_score(y_test[:,idx], y_pred[:,idx])
+            rmse = mean_squared_error(y_test[:,idx], y_pred[:,idx])
+            mae  = mean_absolute_error(y_test[:,idx], y_pred[:,idx])
+            scores['Method'] = name
+            scores['Feature'] = feature_name
+            scores['R2'] = r2
+            scores['RMSE'] = rmse
+            scores['MAE'] = mae
+            feature_scores.append(scores)
+
+    prediction_results['Prediction'] = p_result
+
+    return mean_scores, feature_scores, prediction_results
+
+def ML_display_scores(mean_scores:dict, feature_scores:list):
+    print("  Mean Scores   ")
+    # Print a summary table ---
+    print(f"{'Model':<20}   {'R2':>6}   {'RMSE':>8}   {'MAE':>8}")
+    print("-"*48)
+    for name,(r2,rmse,mae) in mean_scores.items():
+        print(f"{name:<20}   {r2:6.3f}   {rmse:8.3f}   {mae:8.3f}")
+
+    print("      ")
+    print("  Each output feature's Scores   ")
+    p_features_scores = pd.DataFrame(feature_scores)
+    print(p_features_scores)
+
+def ML_vis_prediction_results(prediction_results, features, y_scaler, sites:int, years:int, day_of_year:int, choiced_site:int, choiced_year:int):
+    assert(choiced_site < sites)
+    assert(choiced_year < years)
+    
+    y_test = prediction_results['Ground Truth']
+    all_pred = prediction_results['Prediction']
+
+    for item in all_pred:
+        for method, y_pred in item.items():
+            _y_pred = y_pred.reshape(sites, years,day_of_year,-1) # Reshape to [sites, years, day of year, output features]
+            _y_test = y_test.reshape(sites, years,day_of_year,-1)
+            
+            site_idx = choiced_site
+            year_idx = choiced_year
+            all_predictions_flat = _y_pred[site_idx, year_idx,:,:]
+            all_targets_flat     = _y_test[site_idx, year_idx,:,:]
+
+            plot_result(y_scaler, features, all_predictions_flat,all_targets_flat, site=site_idx, year=year_idx, sub_title=method)
+            scatter_result(y_scaler, features, y_pred, y_test, sub_title=method)
+
+''' End of Machine Learning Models'''
 
 class SequenceDataset(Dataset):
     def __init__(self, inputs, outputs, days_per_year=365):
