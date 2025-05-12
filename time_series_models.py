@@ -819,3 +819,55 @@ class RecoGRU_KGML(TimeSeriesModel):
                 weight.new_zeros(1, bsz, self.hidden_dim),
                 weight.new_zeros(2, bsz, self.hidden_dim),
                 weight.new_zeros(1, bsz, self.hidden_dim))
+    
+# Transformer model
+class RelPositionalEncoding(nn.Module):
+    def __init__(self, d_model):
+        super().__init__()
+        inv_freq = 1.0 / (10000 ** (torch.arange(0, d_model, 2).float() / d_model))
+        self.register_buffer("inv_freq", inv_freq)
+
+    def forward(self, seq_len):
+        positions = torch.arange(seq_len, device=self.inv_freq.device).type_as(self.inv_freq)
+        sinusoid_inp = torch.einsum("i,j->ij", positions, self.inv_freq)
+        pos_enc = torch.cat([sinusoid_inp.sin(), sinusoid_inp.cos()], dim=-1)
+        return pos_enc  # (seq_len, d_model)
+
+def generate_causal_mask(query_len, key_len, device):
+    mask = torch.full((query_len, key_len), float('-inf'), device=device)
+    mask = torch.triu(mask, diagonal=1)  # upper triangle
+    return mask
+
+class TimeSeriesTransformer(TimeSeriesModel):
+    def __init__(self, input_dim, hidden_dim, num_layers, output_dim, d_model=128,  nhead=8, dropout=0.1):
+        super().__init__(input_dim, hidden_dim, num_layers, output_dim)
+        self.input_proj = nn.Linear(input_dim, d_model)
+
+        self.positional_encoding = RelPositionalEncoding(d_model=d_model)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, 
+            nhead=nhead, 
+            dim_feedforward=hidden_dim, 
+            dropout=dropout, 
+            batch_first=True
+        )
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+        self.output_proj = nn.Linear(d_model, output_dim)
+
+    def forward(self, x):
+        # x: (batch, time, features)
+        batch_size, seq_len, _ = x.size()
+        x = self.input_proj(x)  # (batch, time, d_model)
+
+        pos_enc = self.positional_encoding(seq_len).unsqueeze(0)  # (1, time, d_model)
+        x = x + pos_enc  # broadcasting position encoding
+        mask = generate_causal_mask(seq_len, seq_len, x.device) 
+
+        # Transformer expects (batch, seq_len, d_model)
+        out = self.transformer_encoder(x)
+
+
+        out = self.output_proj(out)  # (batch, time, output_dim)
+        return out
