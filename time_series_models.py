@@ -1,5 +1,6 @@
 from typing import Tuple
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,7 +10,8 @@ from torch.utils.data import Dataset, DataLoader
 # from sequence_dataset import SequenceDataset, train_test_split
 
 import matplotlib.pyplot as plt
-from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 import scipy.stats as stats
 
 def Z_norm_reverse(X,Xscaler,units_convert=1.0):
@@ -17,6 +19,179 @@ def Z_norm_reverse(X,Xscaler,units_convert=1.0):
 
 def Z_norm_with_scaler(X,Xscaler):
     return (X-Xscaler[0])/Xscaler[1]
+
+def plot_result(y_scaler:list, features:list, all_predictions_flat:list,all_targets_flat:list, site:int, year:int, sub_title:str=None):
+
+    N, F = all_targets_flat.shape # N: 365, F: features number
+
+    fig, axes = plt.subplots(F, 1, figsize=(12, 4*F))
+
+    for i, name in enumerate(features):
+        ax_line = axes[i]
+
+        y_true = Z_norm_reverse(all_targets_flat[:,i], y_scaler[i])
+        if isinstance(y_true, torch.Tensor):
+            y_true = y_true.numpy()
+        y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i])
+        if isinstance(y_pred, torch.Tensor):
+            y_pred = y_pred.numpy()
+        
+        # LINE PLOT: Days index vs. values
+        ax_line.plot(np.arange(N), y_true, 'o', label='True', color='steelblue', lw=1)
+        ax_line.plot(np.arange(N), y_pred, label='Pred', color='red',lw=1, alpha=0.7)
+        ax_line.set_title(f"{name} over Days")
+        ax_line.set_xlabel("Days Index")
+        ax_line.set_ylabel(name)
+        ax_line.legend(fontsize=8)
+
+    # Tighten up and show
+    if sub_title is None:
+        full_title = f"Site {site} Year {year}"
+    else:
+        full_title = f"{sub_title} Site {site} Year {year}"
+    fig.suptitle(full_title, fontsize=12)
+    fig.subplots_adjust(top=0.9, hspace=0.4)
+    plt.show()
+
+def scatter_result(y_scaler:list, features:list, all_predictions_flat, all_targets_flat,sub_title:str=None):
+
+    N, F = all_targets_flat.shape # N: 365, F: features number
+
+    fig, axes = plt.subplots(F, 1, figsize=(12, 4*F))
+
+    for i, name in enumerate(features):
+        ax_scatter = axes[i]
+
+        y_true = Z_norm_reverse(all_targets_flat[:,i], y_scaler[i])
+        if isinstance(y_true, torch.Tensor):
+            y_true = y_true.numpy()
+        y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i])
+        if isinstance(y_pred, torch.Tensor):
+            y_pred = y_pred.numpy()
+
+        # SCATTER PLOT: true vs. pred
+        mn = min(y_true.min(), y_pred.min())
+        mx = max(y_true.max(), y_pred.max())
+
+        m, b, r_value, p_value, std_err = stats.linregress(y_true, y_pred) #r,p,std
+        ax_scatter.plot(y_pred, m*y_pred + b,color='red',lw=1.0)
+        ax_scatter.plot([mn, mx], [mn, mx],color='steelblue',linestyle='--')
+
+        # Compute metrics
+        r2   = r2_score(y_true, y_pred)
+        rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+        bias = np.mean(y_pred - y_true)
+
+        # Format text
+        stats_text = (
+            f"$R^2$ = {r2:.3f}\n"
+            f"RMSE = {rmse:.3f}\n"
+            f"Bias = {bias:.3f}"
+        )
+
+        # Place text in the upper left in axes-fraction coordinates
+        ax_scatter.text(
+            0.05, 0.95, stats_text,
+            transform= ax_scatter.transAxes,
+            fontsize=10,
+            verticalalignment='top',
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.7)
+        )
+
+        ax_scatter.scatter(y_true, y_pred, alpha=0.4, s=10)
+        # ax_scatter.plot([mn, mx], [mn, mx], 'k--', lw=1)
+        ax_scatter.set_title(f"{name}: True vs. Predicted")
+        ax_scatter.set_xlabel("True Value")
+        ax_scatter.set_ylabel("Predicted Value")
+        ax_scatter.set_xlim(mn, mx)
+        ax_scatter.set_ylim(mn, mx)
+
+    # Tighten up and show
+    if sub_title is None:
+        full_title = "True vs Prediction Values"
+    else:
+        full_title = f"{sub_title} True vs Prediction Values"
+    fig.suptitle(full_title, fontsize=12)
+    fig.subplots_adjust(top=0.9, hspace=0.4)
+    plt.show()
+
+''' Begin for Machine Learning Models. Those functions are for easy to train, test, and Visualiztion '''
+
+def ML_train_and_test(regressors:dict, X_train, X_test, y_train, y_test, output_features:list):
+    mean_scores = {}
+    feature_scores = []
+    prediction_results = dict()
+    prediction_results['Ground Truth'] = y_test
+
+    p_result = list()
+    # Loop, fit, predict, score ---
+    for name, reg in regressors.items():
+        # if multi‐output, wrap in MultiOutputRegressor
+        print(name)
+        _p_result = dict()
+        model = MultiOutputRegressor(reg)
+        # train
+        model.fit(X_train, y_train)
+        # predict
+        y_pred = model.predict(X_test)
+        _p_result[name] = y_pred
+        p_result.append(_p_result)
+        # metrics
+        r2   = r2_score(y_test, y_pred, multioutput="uniform_average")
+        rmse = mean_squared_error(y_test, y_pred, multioutput="uniform_average")
+        mae  = mean_absolute_error(y_test, y_pred, multioutput="uniform_average")
+        mean_scores[name] = (r2, rmse, mae)
+
+        for idx,feature_name in enumerate(output_features):
+            scores = dict()
+            r2 = r2_score(y_test[:,idx], y_pred[:,idx])
+            rmse = mean_squared_error(y_test[:,idx], y_pred[:,idx])
+            mae  = mean_absolute_error(y_test[:,idx], y_pred[:,idx])
+            scores['Method'] = name
+            scores['Feature'] = feature_name
+            scores['R2'] = r2
+            scores['RMSE'] = rmse
+            scores['MAE'] = mae
+            feature_scores.append(scores)
+
+    prediction_results['Prediction'] = p_result
+
+    return mean_scores, feature_scores, prediction_results
+
+def ML_display_scores(mean_scores:dict, feature_scores:list):
+    print("  Mean Scores   ")
+    # Print a summary table ---
+    print(f"{'Model':<20}   {'R2':>6}   {'RMSE':>8}   {'MAE':>8}")
+    print("-"*48)
+    for name,(r2,rmse,mae) in mean_scores.items():
+        print(f"{name:<20}   {r2:6.3f}   {rmse:8.3f}   {mae:8.3f}")
+
+    print("      ")
+    print("  Each output feature's Scores   ")
+    p_features_scores = pd.DataFrame(feature_scores)
+    print(p_features_scores)
+
+def ML_vis_prediction_results(prediction_results, features, y_scaler, sites:int, years:int, day_of_year:int, choiced_site:int, choiced_year:int):
+    assert(choiced_site < sites)
+    assert(choiced_year < years)
+    
+    y_test = prediction_results['Ground Truth']
+    all_pred = prediction_results['Prediction']
+
+    for item in all_pred:
+        for method, y_pred in item.items():
+            _y_pred = y_pred.reshape(sites, years,day_of_year,-1) # Reshape to [sites, years, day of year, output features]
+            _y_test = y_test.reshape(sites, years,day_of_year,-1)
+            
+            site_idx = choiced_site
+            year_idx = choiced_year
+            all_predictions_flat = _y_pred[site_idx, year_idx,:,:]
+            all_targets_flat     = _y_test[site_idx, year_idx,:,:]
+
+            plot_result(y_scaler, features, all_predictions_flat,all_targets_flat, site=site_idx, year=year_idx, sub_title=method)
+            scatter_result(y_scaler, features, y_pred, y_test, sub_title=method)
+
+''' End of Machine Learning Models'''
 
 class SequenceDataset(Dataset):
     def __init__(self, inputs, outputs, days_per_year=365):
@@ -322,16 +497,28 @@ class TimeSeriesModel(nn.Module):
         _idx = site*2 + year
         all_predictions_flat = self.all_predictions[_idx, :, :].reshape(-1,y_param_num)
         all_targets_flat     = self.all_targets[_idx,:,:].reshape(-1,y_param_num)
+        plot_result(y_scaler, features, all_predictions_flat, all_targets_flat, site, year)
         
-        N, F = all_targets_flat.shape # N: 365, F: features number
+
+    def Vis_plot_prediction_result_time_series_masked(self, y_scaler:list, features:list, site:int,year:int, obs_mask:np.ndarray=None):
+        y_param_num = self.all_targets.shape[-1]
+        # self.all_predictions shape is [200, 365, features]
+        _idx = site*2 + year
+        predictions_flat = self.all_predictions[_idx, :, :].reshape(-1,y_param_num)
+        targets_flat     = self.all_targets[_idx,:,:].reshape(-1,y_param_num)
+        mask = obs_mask.reshape(self.all_targets.shape)[_idx,:,:].reshape(-1,y_param_num)
+        N, F = targets_flat.shape # N: 365, F: features number
 
         fig, axes = plt.subplots(F, 1, figsize=(12, 4*F))
 
         for i, name in enumerate(features):
             ax_line = axes[i]
 
-            y_true = Z_norm_reverse(all_targets_flat[:,i], y_scaler[i]).numpy()
-            y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i]).numpy()
+            y_true = Z_norm_reverse(targets_flat[:,i], y_scaler[i]).numpy()
+            y_pred = Z_norm_reverse(predictions_flat[:,i], y_scaler[i]).numpy()
+            if mask is not None or mask.size != 0:
+                y_mask = mask.reshape(-1, mask.shape[-1])[:,i]
+                y_true = np.where(y_mask == 0, np.nan, y_true)
             
             # LINE PLOT: Days index vs. values
             ax_line.plot(np.arange(N), y_true, 'o', label='True', color='steelblue', lw=1)
@@ -346,40 +533,6 @@ class TimeSeriesModel(nn.Module):
         fig.suptitle(sub_title, fontsize=12)
         fig.subplots_adjust(top=0.9, hspace=0.4)
         plt.show()
-
-    def Vis_plot_prediction_result_time_series_masked(self, y_scaler:list, features:list, site:int,year:int, obs_mask:np.ndarray=None):
-            y_param_num = self.all_targets.shape[-1]
-            # self.all_predictions shape is [200, 365, features]
-            _idx = site*2 + year
-            predictions_flat = self.all_predictions[_idx, :, :].reshape(-1,y_param_num)
-            targets_flat     = self.all_targets[_idx,:,:].reshape(-1,y_param_num)
-            mask = obs_mask.reshape(self.all_targets.shape)[_idx,:,:].reshape(-1,y_param_num)
-            N, F = targets_flat.shape # N: 365, F: features number
-
-            fig, axes = plt.subplots(F, 1, figsize=(12, 4*F))
-
-            for i, name in enumerate(features):
-                ax_line = axes[i]
-
-                y_true = Z_norm_reverse(targets_flat[:,i], y_scaler[i]).numpy()
-                y_pred = Z_norm_reverse(predictions_flat[:,i], y_scaler[i]).numpy()
-                if mask is not None or mask.size != 0:
-                    y_mask = mask.reshape(-1, mask.shape[-1])[:,i]
-                    y_true = np.where(y_mask == 0, np.nan, y_true)
-                
-                # LINE PLOT: Days index vs. values
-                ax_line.plot(np.arange(N), y_true, 'o', label='True', color='steelblue', lw=1)
-                ax_line.plot(np.arange(N), y_pred, label='Pred', color='red',lw=1, alpha=0.7)
-                ax_line.set_title(f"{name} over Days")
-                ax_line.set_xlabel("Days Index")
-                ax_line.set_ylabel(name)
-                ax_line.legend(fontsize=8)
-
-            # Tighten up and show
-            sub_title = f"Site {site} Year {year}"
-            fig.suptitle(sub_title, fontsize=12)
-            fig.subplots_adjust(top=0.9, hspace=0.4)
-            plt.show()
             
 
     # Scatter the prediction value and true values base on test dataset
@@ -390,125 +543,8 @@ class TimeSeriesModel(nn.Module):
         all_predictions_flat = self.all_predictions.reshape(-1,y_param_num)
         all_targets_flat     = self.all_targets.reshape(-1,y_param_num)
         
-        N, F = all_targets_flat.shape # N: 365, F: features number
+        scatter_result(y_scaler, features, all_predictions_flat, all_targets_flat)
 
-        fig, axes = plt.subplots(F, 1, figsize=(12, 4*F))
-
-        for i, name in enumerate(features):
-            ax_scatter = axes[i]
-            y_true = Z_norm_reverse(all_targets_flat[:,i], y_scaler[i]).numpy()
-            y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i]).numpy()
-
-            # SCATTER PLOT: true vs. pred
-            mn = min(y_true.min(), y_pred.min())
-            mx = max(y_true.max(), y_pred.max())
-
-            m, b, r_value, p_value, std_err = stats.linregress(y_true, y_pred) #r,p,std
-            ax_scatter.plot(y_pred, m*y_pred + b,color='red',lw=1.0)
-            ax_scatter.plot([mn, mx], [mn, mx],color='steelblue',linestyle='--')
-
-            # Compute metrics
-            r2   = r2_score(y_true, y_pred)
-            rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-            bias = np.mean(y_pred - y_true)
-
-            # Format text
-            stats_text = (
-                f"$R^2$ = {r2:.3f}\n"
-                f"RMSE = {rmse:.3f}\n"
-                f"Bias = {bias:.3f}"
-            )
-
-            # Place text in the upper left in axes-fraction coordinates
-            ax_scatter.text(
-                0.05, 0.95, stats_text,
-                transform= ax_scatter.transAxes,
-                fontsize=10,
-                verticalalignment='top',
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.7)
-            )
-
-            ax_scatter.scatter(y_true, y_pred, alpha=0.4, s=10)
-            # ax_scatter.plot([mn, mx], [mn, mx], 'k--', lw=1)
-            ax_scatter.set_title(f"{name}: True vs. Predicted")
-            ax_scatter.set_xlabel("True Value")
-            ax_scatter.set_ylabel("Predicted Value")
-            ax_scatter.set_xlim(mn, mx)
-            ax_scatter.set_ylim(mn, mx)
-
-        # Tighten up and show
-        sub_title = "True vs Prediction Values"
-        fig.suptitle(sub_title, fontsize=12)
-        fig.subplots_adjust(top=0.9, hspace=0.4)
-        plt.show()
-
-    def Vis_prediction_result(self, y_scaler:list, features:list, site:int,year:int):
-        y_param_num = self.all_targets.shape[-1]
-        # self.all_predictions shape is [200, 365, features]
-        _idx = site*2 + year
-        all_predictions_flat = self.all_predictions[_idx, :, :].reshape(-1,y_param_num)
-        all_targets_flat     = self.all_targets[_idx,:,:].reshape(-1,y_param_num)
-        
-        N, F = all_targets_flat.shape # N: 365, F: features number
-
-        fig, axes = plt.subplots(F, 2, figsize=(12, 4*F))
-
-        for i, name in enumerate(features):
-            ax_line, ax_scatter = axes[i]
-
-            y_true = Z_norm_reverse(all_targets_flat[:,i], y_scaler[i]).numpy()
-            y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i]).numpy()
-            
-            # 1) LINE PLOT: Days index vs. values
-            ax_line.plot(np.arange(N), y_true, label='True', lw=1)
-            ax_line.plot(np.arange(N), y_pred, label='Pred', lw=1, alpha=0.7)
-            ax_line.set_title(f"{name} over Days")
-            ax_line.set_xlabel("Days Index")
-            ax_line.set_ylabel(name)
-            ax_line.legend(fontsize=8)
-
-            # 2) SCATTER PLOT: true vs. pred
-            mn = min(y_true.min(), y_pred.min())
-            mx = max(y_true.max(), y_pred.max())
-
-            m, b, r_value, p_value, std_err = stats.linregress(y_true, y_pred) #r,p,std
-            ax_scatter.plot(y_pred, m*y_pred + b,color='red',lw=1.0)
-            ax_scatter.plot([mn, mx], [mn, mx],color='steelblue',linestyle='--')
-
-            # Compute metrics
-            r2   = r2_score(y_true, y_pred)
-            rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-            bias = np.mean(y_pred - y_true)
-
-            # Format text
-            stats_text = (
-                f"$R^2$ = {r2:.3f}\n"
-                f"RMSE = {rmse:.3f}\n"
-                f"Bias = {bias:.3f}"
-            )
-
-            # Place text in the upper left in axes-fraction coordinates
-            ax_scatter.text(
-                0.05, 0.95, stats_text,
-                transform= ax_scatter.transAxes,
-                fontsize=10,
-                verticalalignment='top',
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.7)
-            )
-
-            ax_scatter.scatter(y_true, y_pred, alpha=0.4, s=10)
-            # ax_scatter.plot([mn, mx], [mn, mx], 'k--', lw=1)
-            ax_scatter.set_title(f"{name}: True vs. Predicted")
-            ax_scatter.set_xlabel("True Value")
-            ax_scatter.set_ylabel("Predicted Value")
-            ax_scatter.set_xlim(mn, mx)
-            ax_scatter.set_ylim(mn, mx)
-
-        # Tighten up and show
-        sub_title = f"Site {site} Year {year}"
-        plt.suptitle(sub_title, fontsize=12)
-        plt.tight_layout()
-        plt.show()
 
 # A GRU with Attension Regression Model
 class Attention(nn.Module):
@@ -588,7 +624,6 @@ class LSTMSeq2Seq(TimeSeriesModel):
         lstm_out, _ = self.lstm(x)  # lstm_out shape: (batch_size, sequence_length, hidden_dim)
         out = self.fc(lstm_out)     # out shape: (batch_size, sequence_length, output_dim)
         return out
-    
     
 ### 1D CNN Regression models
 
@@ -868,3 +903,55 @@ class RecoGRU_KGML(TimeSeriesModel):
                 weight.new_zeros(1, bsz, self.hidden_dim),
                 weight.new_zeros(2, bsz, self.hidden_dim),
                 weight.new_zeros(1, bsz, self.hidden_dim))
+    
+# Transformer model
+class RelPositionalEncoding(nn.Module):
+    def __init__(self, d_model):
+        super().__init__()
+        inv_freq = 1.0 / (10000 ** (torch.arange(0, d_model, 2).float() / d_model))
+        self.register_buffer("inv_freq", inv_freq)
+
+    def forward(self, seq_len):
+        positions = torch.arange(seq_len, device=self.inv_freq.device).type_as(self.inv_freq)
+        sinusoid_inp = torch.einsum("i,j->ij", positions, self.inv_freq)
+        pos_enc = torch.cat([sinusoid_inp.sin(), sinusoid_inp.cos()], dim=-1)
+        return pos_enc  # (seq_len, d_model)
+
+def generate_causal_mask(query_len, key_len, device):
+    mask = torch.full((query_len, key_len), float('-inf'), device=device)
+    mask = torch.triu(mask, diagonal=1)  # upper triangle
+    return mask
+
+class TimeSeriesTransformer(TimeSeriesModel):
+    def __init__(self, input_dim, hidden_dim, num_layers, output_dim, d_model=128,  nhead=8, dropout=0.1):
+        super().__init__(input_dim, hidden_dim, num_layers, output_dim)
+        self.input_proj = nn.Linear(input_dim, d_model)
+
+        self.positional_encoding = RelPositionalEncoding(d_model=d_model)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, 
+            nhead=nhead, 
+            dim_feedforward=hidden_dim, 
+            dropout=dropout, 
+            batch_first=True
+        )
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+        self.output_proj = nn.Linear(d_model, output_dim)
+
+    def forward(self, x):
+        # x: (batch, time, features)
+        batch_size, seq_len, _ = x.size()
+        x = self.input_proj(x)  # (batch, time, d_model)
+
+        pos_enc = self.positional_encoding(seq_len).unsqueeze(0)  # (1, time, d_model)
+        x = x + pos_enc  # broadcasting position encoding
+        mask = generate_causal_mask(seq_len, seq_len, x.device) 
+
+        # Transformer expects (batch, seq_len, d_model)
+        out = self.transformer_encoder(x)
+
+
+        out = self.output_proj(out)  # (batch, time, output_dim)
+        return out
