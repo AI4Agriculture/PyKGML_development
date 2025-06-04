@@ -101,7 +101,7 @@ Each file is a serialized Python dictionary containing the following keys and va
   • **unified_model_processing.ipynb** is a jupyter notebook to demonstrate the use of PyKGML.  
   
 
-  The original code and clean-up versions of KGMLag-CO2 and KGMLag-N2O are stored in the folder "development materials":
+  The original code of KGMLag-CO2 and KGMLag-N2O and development code of PyKGML are stored in the folder "[development_materials](development_materials)":
     
   • KGMLag_CO2_pretrain_baseline.py and KGMLag_CO2_finetune_baseline.py are the original code from study 1.
     
