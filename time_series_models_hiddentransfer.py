@@ -9,6 +9,7 @@ from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import Dataset, DataLoader
 import kgml_lib
 # from sequence_dataset import SequenceDataset, train_test_split
+from time_series_models import TimeSeriesModel,SequenceDataset
 
 import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score, mean_squared_error
@@ -20,57 +21,14 @@ def Z_norm_reverse(X,Xscaler,units_convert=1.0):
 def Z_norm_with_scaler(X,Xscaler):
     return (X-Xscaler[0])/Xscaler[1]
 
-class SequenceDataset(Dataset):
-    def __init__(self, inputs, outputs, sequence_length=365):
-        """
-        Args:
-            inputs (np.ndarray): Array of shape (time_steps, num_sites, num_input_features)
-            outputs (np.ndarray): Array of shape (time_steps, num_sites, num_output_features)
-            sequence_length (int): Number of consecutive days for each sample.
-        """
-        self.inputs = inputs
-        self.outputs = outputs
-        self.sequence_length = sequence_length
-        
-        self.samples = []
-        num_sites = inputs.shape[0]
-        
-        # For each site, create samples by sliding a window over time.
-        # Each sample uses a window of length `sequence_length` as input
-        # and the target is the corresponding window of outputs.
-        for site in range(num_sites):
-            site_input = inputs[site] # Shape [total_days, input_features]
-            # site_output = outputs[site] # Shape [total_days, input_features]
-            
-            for start in range(0,len(site_input), sequence_length):
-                end = start + sequence_length
-                if end > len(site_input):
-                    break  # Discard incomplete sequences
-                else:
-                    self.samples.append((site, start, end))
-    
-    def __len__(self):
-        return len(self.samples)
-    
-    def __getitem__(self, index):
-        site, start, end = self.samples[index]
-        # Get input sequence and corresponding output sequence.
-        x_seq = self.inputs[site, start:end, :]  # (sequence_length, num_input_features)
-        y_seq = self.outputs[site, start:end, :]   # (sequence_length, num_output_features)
-        # Convert to torch tensors.
-        if not isinstance(x_seq, torch.Tensor):
-            x_seq = torch.tensor(x_seq, dtype=torch.float32)
-            y_seq = torch.tensor(y_seq, dtype=torch.float32)
-        return x_seq, y_seq
-
-
+# Get one site's all years data
 class SequenceDataset_multiYears(Dataset):
     def __init__(self, inputs, outputs, sequence_length=365):
         """
         Args:
-            inputs (np.ndarray): Array of shape (time_steps, num_sites, num_input_features)
-            outputs (np.ndarray): Array of shape (time_steps, num_sites, num_output_features)
-            sequence_length (int): Number of consecutive days for each sample.
+            inputs (np.ndarray): Array of shape (num_sites, years*days_of_year, num_input_features)
+            outputs (np.ndarray): Array of shape (num_sites, years*days_of_year,num_output_features)
+            sequence_length (int): Number of consecutive days for each year.
         """
         self.inputs = inputs
         self.outputs = outputs
@@ -84,9 +42,9 @@ class SequenceDataset_multiYears(Dataset):
         return self.num_sites
     
     def __getitem__(self, index):
-        # Get input sequence and corresponding output sequence.
-        x_seq = self.inputs[index, :, :]  # (sequence_length, num_input_features)
-        y_seq = self.outputs[index, :, :]   # (sequence_length, num_output_features)
+        # index: index of sites. To get one site's all years data
+        x_seq = self.inputs[index, :, :]  # (years*days_of_year, num_input_features)
+        y_seq = self.outputs[index, :, :]   # (years*days_of_year, num_output_features)
         # Convert to torch tensors.
         if not isinstance(x_seq, torch.Tensor):
             x_seq = torch.tensor(x_seq, dtype=torch.float32)
@@ -94,10 +52,10 @@ class SequenceDataset_multiYears(Dataset):
         return x_seq, y_seq
     
 # A commom class for Time series Models
-class TimeSeriesModel(nn.Module):
+class TimeSeriesModel_HiddenTransfer(TimeSeriesModel):
     
     def __init__(self, input_dim, hidden_dim, num_layers, output_dim, dropout=0.2):
-        super().__init__()
+        super().__init__(input_dim, hidden_dim, num_layers, output_dim, dropout)
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
@@ -119,11 +77,20 @@ class TimeSeriesModel(nn.Module):
         self.val_losses = []
         self.epochs_no_improve = 0
 
+    # To support transfer hidden state. Each site has multiple years data. Now needs transfer the hidden state between years
+    # But, can't transfer the hidden state between sites.
+    # When create batch for train and test, needs to make sure one site's all years data together
+    def train_test_split_bysite(self, X, Y, num_sites, num_years, train_batch_size, days_per_year:int = 365, split_method = 'temporal', split_sequence_by_year=False):
+        '''
+        split_method: Train / Test dataset split method
+        For example, the dataset includes 100 sites, and each site has 20 years data, N features
 
-    def train_test_split(self, X, Y, num_sites, num_years, train_batch_size, days_per_year:int = 365, split_method = 'temporal', split_sequence_by_year=False):
+        'temporal': split by year. Choose the last two years as test dataset, train set is [100 sites, 18 years* days of year, N], test set is [100, 2* days of year, N]
+        'spatial': split by site. Choose 20% sites as test set. Train set is [80, 20*days of year, N], test set is [20, 20*days of year, N]
+        '''
         self.total_sites = num_sites
         self.total_years = num_years
-        self.sequence_length = num_years * days_per_year
+        self.sequence_length = days_per_year
 
         # Define the training and test split:
         if split_method == 'temporal': # Choose last two yeas for test
@@ -148,7 +115,7 @@ class TimeSeriesModel(nn.Module):
             train_sites = int(num_sites * 0.8)
 
             # Split the data along the time dimension.
-            shuffled_ix = torch.randperm(self.X.size()[0])
+            shuffled_ix = torch.randperm(X.size()[0])
             X = X[shuffled_ix,:,:]
             Y = Y[shuffled_ix,:,:]
 
@@ -165,15 +132,8 @@ class TimeSeriesModel(nn.Module):
 
         
         # Create Dataset objects for training and testing.
-        sequence_length = self.sequence_length  # Must Use 365 whole year's days as a sample
-        if split_sequence_by_year:
-            self.train_years = 1
-            self.test_years = 1
-        train_dataset = SequenceDataset(X_train, Y_train, self.train_years*days_per_year)
-        test_dataset = SequenceDataset(X_test, Y_test, self.test_years*days_per_year)
-        # else:
-        #     train_dataset = SequenceDataset_multiYears(X_train, Y_train, self.train_years*days_per_year)
-        #     test_dataset = SequenceDataset_multiYears(X_test, Y_test, self.test_years*days_per_year)
+        train_dataset = SequenceDataset_multiYears(X_train, Y_train, days_per_year)
+        test_dataset = SequenceDataset_multiYears(X_test, Y_test, days_per_year)
 
         # Create DataLoaders.
         self.X_train = X_train
@@ -182,6 +142,8 @@ class TimeSeriesModel(nn.Module):
         self.Y_test = Y_test
         self.train_loader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=False)
         self.test_loader  = DataLoader(test_dataset, batch_size=1, shuffle=False)
+
+        print(f"X_train shape is {X_train.shape}, Y_train shape {Y_train.shape}, X_test {X_test.shape}, Y_test {Y_test.shape}")
 
         # return train_loader, test_loader
 
@@ -200,9 +162,9 @@ class TimeSeriesModel(nn.Module):
         for param_tensor in self.model.state_dict():
             print(param_tensor, "\t", self.model.state_dict()[param_tensor].size())
 
+    # Train model with hidden state transfer
     def train_model(self, loss_fun, LR=0.001, step_size=20, gamma=0.8, maxepoch=80, use_y_mask=False):
 
-        # model = self.model
         self.to(self.device)
         self.criterion = loss_fun # nn.MSELoss(), nn.L1Loss(), kgml_lib.multiTaskWeighted_Loss()
         self.train_y_mask = use_y_mask
@@ -222,7 +184,6 @@ class TimeSeriesModel(nn.Module):
         scheduler = StepLR(optimizer, step_size=step_size, gamma=gamma)
 
         for epoch in range(num_epochs):
-            # model.train()
             self.train()
             train_losses = []
             train_predictions = []
@@ -238,36 +199,35 @@ class TimeSeriesModel(nn.Module):
 
                 optimizer.zero_grad()
 
-                if self.train_years > 1:  # (batch_size, num_years, 365, features)
-                    total_loss = 0
-                    hidden_state = None  # Initialize hidden state
-                    outputs_pred = torch.zeros(batch_y.size(), device=self.device)
+                batch_loss = 0  # loss per batch
+                hidden_state = None  # Initialize hidden state
+                outputs_pred = torch.zeros(batch_y.size(), device=self.device)
+                batch_size = batch_x.shape[0]
+                for _batch in range(batch_size): # one batch is one site's all years data
+                    # Transfer hidden state between years, but can't between sites
                     for year in range(self.train_years):  # Loop over years
-                        X_batch_year = batch_x[:, year*self.sequence_length:(year+1)*self.sequence_length, :]
-                        Y_batch_year = batch_y[:, year*self.sequence_length:(year+1)*self.sequence_length, :]
+                        X_batch_year = batch_x[_batch, year*self.sequence_length:(year+1)*self.sequence_length, :].unsqueeze(0)
+                        Y_batch_year = batch_y[_batch, year*self.sequence_length:(year+1)*self.sequence_length, :].unsqueeze(0)
                         if hidden_state is None:
                             y_pred, hidden_state = self(X_batch_year)
                         else:
                             y_pred, hidden_state = self(X_batch_year, hidden_state)
                         if use_y_mask:
                             y_pred = y_pred * y_mask
-                        total_loss += self.criterion(y_pred, Y_batch_year)
-                        outputs_pred[:, year*self.sequence_length:(year+1)*self.sequence_length, :] = y_pred[:,:,:]
+                        _loss = self.criterion(y_pred, Y_batch_year)
+                        batch_loss += _loss
+                        outputs_pred[_batch, year*self.sequence_length:(year+1)*self.sequence_length, :] = y_pred[:,:,:]
 
-                    hidden_state = tuple(h.detach() for h in hidden_state)
-                    total_loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
-                    optimizer.step()
-                    train_losses.append(total_loss.item() / self.train_years)  # Normalize loss per year
-                else:  # Single-year data (batch_size, 365, features)
-                    outputs_pred = self(batch_x)
-                    if use_y_mask:
-                            outputs_pred = outputs_pred * y_mask
-                    loss = self.criterion(outputs_pred, batch_y)
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
-                    optimizer.step()
-                    train_losses.append(loss.item())
+                        if isinstance(hidden_state, tuple):  # LSTM
+                            hidden_state = (hidden_state[0].detach(), hidden_state[1].detach())
+                        else:  # GRU
+                            hidden_state = hidden_state.detach()
+
+                batch_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
+                optimizer.step()
+                train_losses.append(batch_loss.item() / (self.train_years* batch_size))  # Normalize loss per year
+
                 train_predictions.append(outputs_pred.cpu())
                 train_targets.append(batch_y.cpu())
             
@@ -277,7 +237,6 @@ class TimeSeriesModel(nn.Module):
             avg_train_loss = np.mean(train_losses)
 
             # Evaluate on the test set.
-            # model.eval()
             self.eval()
             test_losses = []
             test_predictions = []
@@ -290,30 +249,30 @@ class TimeSeriesModel(nn.Module):
                         y_mask = batch_y[..., self.output_dim:]
                         batch_y = batch_y[..., :self.output_dim] * y_mask
 
-                    if self.test_years > 1:  # Multi-year input
-                        total_loss = 0
-                        hidden_state = None
-                        outputs_pred = torch.zeros(batch_y.size(), device=self.device)
+                    batch_loss = 0
+                    hidden_state = None
+                    outputs_pred = torch.zeros(batch_y.size(), device=self.device)
+                    batch_size = batch_x.shape[0]
+                    for _batch in range(batch_size): # one batch is one site's all years data
                         for year in range(self.test_years):  
-                            X_batch_year = batch_x[:, year*self.sequence_length:(year+1)*self.sequence_length, :]
-                            Y_batch_year = batch_y[:, year*self.sequence_length:(year+1)*self.sequence_length, :]
-
+                            X_batch_year = batch_x[_batch, year*self.sequence_length:(year+1)*self.sequence_length, :].unsqueeze(0)
+                            Y_batch_year = batch_y[_batch, year*self.sequence_length:(year+1)*self.sequence_length, :].unsqueeze(0)
                             if hidden_state is None:
                                 y_pred, hidden_state = self(X_batch_year)
                             else:
                                 y_pred, hidden_state = self(X_batch_year, hidden_state)
                             if use_y_mask:
                                 y_pred = y_pred * y_mask
-                            total_loss += self.criterion(y_pred, Y_batch_year)
+                            batch_loss += self.criterion(y_pred, Y_batch_year)
+                            outputs_pred[_batch, year*self.sequence_length:(year+1)*self.sequence_length, :] = y_pred[:,:,:]
 
-                        test_losses.append(total_loss.item() / self.test_years)
-                        outputs_pred[:, year*self.sequence_length:(year+1)*self.sequence_length, :] = y_pred[:,:,:]
-                    else:  # Single-year input
-                        outputs_pred = self(batch_x)
-                        if use_y_mask:
-                            outputs_pred = outputs_pred * y_mask
-                        loss = self.criterion(outputs_pred, batch_y)
-                        test_losses.append(loss.item())
+                            if isinstance(hidden_state, tuple):  # LSTM
+                                hidden_state = (hidden_state[0].detach(), hidden_state[1].detach())
+                            else:  # GRU
+                                hidden_state = hidden_state.detach()
+
+                    test_losses.append(batch_loss.item() / (self.test_years * batch_size))
+
                     test_predictions.append(outputs_pred.cpu())
                     test_targets.append(batch_y.cpu())
             
@@ -328,14 +287,14 @@ class TimeSeriesModel(nn.Module):
             # Early stopping check
             if avg_test_loss < best_loss:
                 best_loss = avg_test_loss
-                # torch.save(model.state_dict(), checkpoint_path)
+                # torch.save(self.state_dict(), checkpoint_path)
                 torch.save(self.state_dict(), checkpoint_path)
                 epochs_no_improve = 0
             else:
                 epochs_no_improve += 1
                 if epochs_no_improve >= patience and epoch >= 40:
                     print(f'\n#***# Early stopping triggered after {epoch+1} epochs!')
-                    # model.load_state_dict(torch.load(checkpoint_path))
+                    # self.load_state_dict(torch.load(checkpoint_path))
                     self.load_state_dict(torch.load(checkpoint_path))
                     break
             
@@ -343,7 +302,7 @@ class TimeSeriesModel(nn.Module):
             self.val_losses.append(avg_test_loss)
             self.epochs = epoch+1
             print(f"Epoch {epoch+1}/{num_epochs} | LR: {scheduler.get_last_lr()[0]:.6f}, Train Loss: {avg_train_loss:.4f}, Test Loss: {avg_test_loss:.4f}")
-            print(f'Train R2:  {train_R2:.2f}', f'Test R2:  {test_R2:.2f}')
+            print(f'Train R2:  {train_R2.mean():.2f}', f'Test R2:  {test_R2.mean():.2f}')
 
     def test(self, use_y_mask=False):
         self.eval()
@@ -354,8 +313,6 @@ class TimeSeriesModel(nn.Module):
         
         with torch.no_grad():
             for batch_x, batch_y in self.test_loader:
-                #print("Count = ", count)
-                # Move the batch data to the proper device (GPU or CPU)
                 batch_x = batch_x.to(self.device)
                 batch_y = batch_y.to(self.device)
                 if use_y_mask:
@@ -363,38 +320,31 @@ class TimeSeriesModel(nn.Module):
                     batch_y = batch_y[..., :self.output_dim] * y_mask
                 
                 outputs_pred = torch.zeros(batch_y.size(), device=self.device)
-                # Get model predictions
-                # outputs_pred = model(batch_x)
-                if self.test_years > 1:  # Multi-year input
-                    total_loss = 0
-                    hidden_state = None
-
+                total_loss = 0
+                hidden_state = None # Initial hidden per batch
+                batch_size = batch_x.shape[0]
+                for _batch in range(batch_size): # one batch is one site's all years data
                     for year in range(self.test_years):  
-                        X_batch_year = batch_x[:, year*self.sequence_length:(year+1)*self.sequence_length, :]
-                        Y_batch_year = batch_y[:, year*self.sequence_length:(year+1)*self.sequence_length, :]
+                        X_batch_year = batch_x[_batch, year*self.sequence_length:(year+1)*self.sequence_length, :].unsqueeze(0)
+                        Y_batch_year = batch_y[_batch, year*self.sequence_length:(year+1)*self.sequence_length, :].unsqueeze(0)
 
                         if hidden_state is None:
                             y_pred, hidden_state = self(X_batch_year)
                         else:
                             y_pred, hidden_state = self(X_batch_year, hidden_state)
+                        
                         if use_y_mask:
                             y_pred = y_pred * y_mask
                         total_loss += self.criterion(y_pred, Y_batch_year)
+                        outputs_pred[_batch, year*self.sequence_length:(year+1)*self.sequence_length, :] = y_pred[:,:,:]
 
-                    test_losses.append(total_loss.item() / self.test_years)
-                    outputs_pred[:, year*self.sequence_length:(year+1)*self.sequence_length, :] = y_pred[:,:,:]
-                else:  # Single-year input
-                    outputs_pred = self(batch_x)
-                    if use_y_mask:
-                        outputs_pred = outputs_pred * y_mask
-                    loss = self.criterion(outputs_pred, batch_y)
-                    test_losses.append(loss.item())
+                        if isinstance(hidden_state, tuple):  # LSTM
+                            hidden_state = (hidden_state[0].detach(), hidden_state[1].detach())
+                        else:  # GRU
+                            hidden_state = hidden_state.detach()
 
-                # Compute loss
-                loss = self.criterion(outputs_pred, batch_y)
-                test_losses.append(loss.item())
-                
-                # (Optional) Save predictions and targets for further analysis
+                    test_losses.append(total_loss.item() / (self.test_years * batch_size))
+
                 all_predictions.append(outputs_pred.cpu())
                 all_targets.append(batch_y.cpu())
         
@@ -402,20 +352,12 @@ class TimeSeriesModel(nn.Module):
         avg_test_loss = np.mean(test_losses)
         print(f"Test Loss: {avg_test_loss:.4f}")
 
-        # (Optional) If you want to concatenate all predictions and targets:
+        # concatenate all predictions and targets:
         self.all_predictions = torch.cat(all_predictions, dim=0)
         self.all_targets = torch.cat(all_targets, dim=0)
         compute_r2 = self.compute_r2
         test_R2 = compute_r2(self.all_predictions, self.all_targets)
-        print(f'Test R2:  {test_R2:.2f}')
-
-    def get_R2_score(self, y_scaler:list, output_feature_name:list):
-        y_param_num = self.all_targets.shape[-1]
-        all_predictions_flat = self.all_predictions.reshape(-1,y_param_num)
-        all_targets_flat = self.all_targets.reshape(-1,y_param_num)
-        for i in range(y_param_num):
-            _r2 = r2_score(Z_norm_reverse(all_targets_flat[:,i], y_scaler[i]), Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i]))
-            print(f"Feature {output_feature_name[i]} R2 Score is: {_r2}")
+        print(f'Test R2:  {test_R2.mean():.2f}')
 
     def check_results(self, device, check_xset, check_yset, num_years, use_y_mask):
         """
@@ -447,292 +389,6 @@ class TimeSeriesModel(nn.Module):
         return check_pred.cpu()
 
 
-    def plot_training_curves(self):
-        epoch_list = np.arange(1, self.epochs + 1)
-        plt.figure(figsize=(10, 6))
-        plt.plot(epoch_list, self.train_losses, label='Training Loss')
-        plt.plot(epoch_list, self.val_losses, label='Validation Loss')
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss')
-        plt.title('Training Progress')
-        plt.legend()
-        plt.grid(True)
-        plt.show()
-
-
-    def vis_scatter(self, features:list, y_scaler:list=None):
-        ########################################################################################
-        ###visualize scatter plots of training and testing
-        ########################################################################################
-
-        # if data_path:
-        #     data = torch.load(data_path,map_location=torch.device('cpu'),weights_only=False)
-        # else:
-        #     data = self.dataset
-
-        X_train = self.X_train
-        Y_train = self.Y_train
-        X_test = self.X_test
-        Y_test = self.Y_test
-        Y_train_pred = self.check_results(self.device, X_train, Y_train, self.train_years)
-        Y_test_pred = self.check_results(self.device, X_test, Y_test, self.test_years)
-
-        compute_r2 = self.compute_r2
-        plt.rcParams.update({'font.size': 13})
-        plt.rcParams['xtick.labelsize']=13
-        plt.rcParams['ytick.labelsize']=13
-        ncols = 2
-        nrows = Y_train.size(2)
-        
-        if y_scaler is None:
-            y_scaler = np.ones((nrows,2))
-
-        fig, axes = plt.subplots(nrows,ncols,figsize=(6*ncols, 5*nrows))   
-        test_names = ['Train','Test']
-
-        for i in range(nrows):
-            for col in range(2):
-    
-                if col == 0:
-                    Ysim = kgml_lib.Z_norm_reverse(Y_train_pred[:,:,i],y_scaler[i,:]).to("cpu")
-                    Yobs = kgml_lib.Z_norm_reverse(Y_train[:,:,i],y_scaler[i,:]).to("cpu")
-                    # Y_maskb = Y2_maskb_val[:,:,i].to("cpu")
-                else:
-                    Ysim = kgml_lib.Z_norm_reverse(Y_test_pred[:,:,i],y_scaler[i,:]).to("cpu")
-                    Yobs = kgml_lib.Z_norm_reverse(Y_test[:,:,i],y_scaler[i,:]).to("cpu")
-                    # Y_maskb = Y2_maskb_test[:,:,i].to("cpu")
-                if i < 2:
-                    Ysim = - Ysim
-                    Yobs = - Yobs
-                
-                if nrows > 1:
-                    ax = axes[i,col]
-                else:
-                    ax = axes[col]
-                ax.scatter( Yobs.contiguous().view(-1).numpy(),Ysim.contiguous().view(-1).numpy(), s=10,color='black',alpha=0.5)
-                R2 = compute_r2(Ysim, Yobs).numpy()
-                RMSE =  np.sqrt(kgml_lib.my_loss(Ysim, Yobs).numpy())
-                Bias = torch.mean(Ysim-Yobs).numpy()
-                m, b, r_value, p_value, std_err = stats.linregress(Ysim.contiguous().view(-1).numpy(), Yobs.contiguous().view(-1).numpy()) #r,p,std
-
-                lim_min = min(np.min(Ysim.contiguous().view(-1).numpy()), np.min(Yobs.contiguous().view(-1).numpy()))
-                lim_max = max(np.max(Ysim.contiguous().view(-1).numpy()), np.max(Yobs.contiguous().view(-1).numpy()))
-                ax.set_xlim([lim_min, lim_max])
-                ax.set_ylim([lim_min, lim_max])
-                ax.text(0.1,0.75,'R$^2$=%0.3f\nRMSE=%0.3f\nbias=%0.3f' 
-                    % (R2,RMSE,Bias), transform=ax.transAxes, fontsize = 12)
-                if i == nrows-1:
-                    ax.set_xlabel('True values',fontsize = 15,weight='bold')
-                if col == 0:
-                    ax.set_ylabel('Predicted values',fontsize = 15,weight='bold')
-                ax.set_title(test_names[col],fontsize = 15,weight='bold')
-                ax.set_xlabel(features[i],fontsize = 14)
-                ax.plot(Yobs, m*Yobs + b,color='steelblue',lw=1.0)
-                ax.plot([lim_min,lim_max], [lim_min,lim_max],color='red',linestyle='--')
-        
-        # Tighten up and show
-        sub_title = "True vs Prediction Values"
-        fig.suptitle(sub_title, fontsize=12)
-        fig.subplots_adjust(top=0.9, hspace=0.4)
-        plt.show()
-    
-    
-    # Scatter the prediction value and true values base on test dataset
-    def Vis_scatter_prediction_result(self, y_scaler:list, features:list):
-        y_param_num = self.all_targets.shape[-1]
-        # self.all_predictions shape is [200, 365, features]
-
-        all_predictions_flat = self.all_predictions.reshape(-1,y_param_num)
-        all_targets_flat     = self.all_targets.reshape(-1,y_param_num)
-        
-        N, F = all_targets_flat.shape # N: 365, F: features number
-
-        fig, axes = plt.subplots(F, 1, figsize=(12, 4*F))
-
-        for i, name in enumerate(features):
-            ax_scatter = axes[i]
-            y_true = Z_norm_reverse(all_targets_flat[:,i], y_scaler[i]).numpy()
-            y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i]).numpy()
-
-            # SCATTER PLOT: true vs. pred
-            mn = min(y_true.min(), y_pred.min())
-            mx = max(y_true.max(), y_pred.max())
-
-            m, b, r_value, p_value, std_err = stats.linregress(y_true, y_pred) #r,p,std
-            ax_scatter.plot(y_pred, m*y_pred + b,color='red',lw=1.0)
-            ax_scatter.plot([mn, mx], [mn, mx],color='steelblue',linestyle='--')
-
-            # Compute metrics
-            r2   = r2_score(y_true, y_pred)
-            rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-            bias = np.mean(y_pred - y_true)
-
-            # Format text
-            stats_text = (
-                f"$R^2$ = {r2:.3f}\n"
-                f"RMSE = {rmse:.3f}\n"
-                f"Bias = {bias:.3f}"
-            )
-
-            # Place text in the upper left in axes-fraction coordinates
-            ax_scatter.text(
-                0.05, 0.95, stats_text,
-                transform= ax_scatter.transAxes,
-                fontsize=10,
-                verticalalignment='top',
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.7)
-            )
-
-            ax_scatter.scatter(y_true, y_pred, alpha=0.4, s=10)
-            # ax_scatter.plot([mn, mx], [mn, mx], 'k--', lw=1)
-            ax_scatter.set_title(f"{name}: True vs. Predicted")
-            ax_scatter.set_xlabel("True Value")
-            ax_scatter.set_ylabel("Predicted Value")
-            ax_scatter.set_xlim(mn, mx)
-            ax_scatter.set_ylim(mn, mx)
-
-        # Tighten up and show
-        sub_title = "True vs Prediction Values"
-        fig.suptitle(sub_title, fontsize=12)
-        fig.subplots_adjust(top=0.9, hspace=0.4)
-        plt.show()
-
-    def Vis_prediction_result(self, y_scaler:list, features:list, site:int,year:int):
-        y_param_num = self.all_targets.shape[-1]
-        # self.all_predictions shape is [200, 365, features]
-        _idx = site*2 + year
-        all_predictions_flat = self.all_predictions[_idx, :, :].reshape(-1,y_param_num)
-        all_targets_flat     = self.all_targets[_idx,:,:].reshape(-1,y_param_num)
-        
-        N, F = all_targets_flat.shape # N: 365, F: features number
-
-        fig, axes = plt.subplots(F, 2, figsize=(12, 4*F))
-
-        for i, name in enumerate(features):
-            ax_line, ax_scatter = axes[i]
-
-            y_true = Z_norm_reverse(all_targets_flat[:,i], y_scaler[i]).numpy()
-            y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i]).numpy()
-            
-            # 1) LINE PLOT: Days index vs. values
-            ax_line.plot(np.arange(N), y_true, label='True', lw=1)
-            ax_line.plot(np.arange(N), y_pred, label='Pred', lw=1, alpha=0.7)
-            ax_line.set_title(f"{name} over Days")
-            ax_line.set_xlabel("Days Index")
-            ax_line.set_ylabel(name)
-            ax_line.legend(fontsize=8)
-
-            # 2) SCATTER PLOT: true vs. pred
-            mn = min(y_true.min(), y_pred.min())
-            mx = max(y_true.max(), y_pred.max())
-
-            m, b, r_value, p_value, std_err = stats.linregress(y_true, y_pred) #r,p,std
-            ax_scatter.plot(y_pred, m*y_pred + b,color='red',lw=1.0)
-            ax_scatter.plot([mn, mx], [mn, mx],color='steelblue',linestyle='--')
-
-            # Compute metrics
-            r2   = r2_score(y_true, y_pred)
-            rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-            bias = np.mean(y_pred - y_true)
-
-            # Format text
-            stats_text = (
-                f"$R^2$ = {r2:.3f}\n"
-                f"RMSE = {rmse:.3f}\n"
-                f"Bias = {bias:.3f}"
-            )
-
-            # Place text in the upper left in axes-fraction coordinates
-            ax_scatter.text(
-                0.05, 0.95, stats_text,
-                transform= ax_scatter.transAxes,
-                fontsize=10,
-                verticalalignment='top',
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.7)
-            )
-
-            ax_scatter.scatter(y_true, y_pred, alpha=0.4, s=10)
-            # ax_scatter.plot([mn, mx], [mn, mx], 'k--', lw=1)
-            ax_scatter.set_title(f"{name}: True vs. Predicted")
-            ax_scatter.set_xlabel("True Value")
-            ax_scatter.set_ylabel("Predicted Value")
-            ax_scatter.set_xlim(mn, mx)
-            ax_scatter.set_ylim(mn, mx)
-
-        # Tighten up and show
-        sub_title = f"Site {site} Year {year}"
-        plt.suptitle(sub_title, fontsize=12)
-        plt.tight_layout()
-        plt.show()
-
-
-    # Select one site, one year in the test dataset
-    # To plot curves for comparing the prediction and true values
-    def Vis_plot_prediction_result_time_series(self, y_scaler:list, features:list, site:int,year:int):
-        y_param_num = self.all_targets.shape[-1]
-        # self.all_predictions shape is [200, 365, features]
-        _idx = site*2 + year
-        all_predictions_flat = self.all_predictions[_idx, :, :].reshape(-1,y_param_num)
-        all_targets_flat     = self.all_targets[_idx,:,:].reshape(-1,y_param_num)
-        
-        N, F = all_targets_flat.shape # N: 365, F: features number
-
-        fig, axes = plt.subplots(F, 1, figsize=(12, 4*F))
-
-        for i, name in enumerate(features):
-            ax_line = axes[i]
-
-            y_true = Z_norm_reverse(all_targets_flat[:,i], y_scaler[i]).numpy()
-            y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i]).numpy()
-            
-            # LINE PLOT: Days index vs. values
-            ax_line.plot(np.arange(N), y_true, 'o', label='True', color='steelblue', lw=1)
-            ax_line.plot(np.arange(N), y_pred, label='Pred', color='red',lw=1, alpha=0.7)
-            ax_line.set_title(f"{name} over Days")
-            ax_line.set_xlabel("Days Index")
-            ax_line.set_ylabel(name)
-            ax_line.legend(fontsize=8)
-
-        # Tighten up and show
-        sub_title = f"Site {site} Year {year}"
-        fig.suptitle(sub_title, fontsize=12)
-        fig.subplots_adjust(top=0.9, hspace=0.4)
-        plt.show()
-
-    def Vis_plot_prediction_result_time_series_masked(self, y_scaler:list, features:list, site:int,year:int, obs_mask:np.ndarray=None):
-            y_param_num = self.all_targets.shape[-1]
-            # self.all_predictions shape is [200, 365, features]
-            _idx = site*2 + year
-            predictions_flat = self.all_predictions[_idx, :, :].reshape(-1,y_param_num)
-            targets_flat     = self.all_targets[_idx,:,:].reshape(-1,y_param_num)
-            mask = obs_mask.reshape(self.all_targets.shape)[_idx,:,:].reshape(-1,y_param_num)
-            N, F = targets_flat.shape # N: 365, F: features number
-
-            fig, axes = plt.subplots(F, 1, figsize=(12, 4*F))
-
-            for i, name in enumerate(features):
-                ax_line = axes[i]
-
-                y_true = Z_norm_reverse(targets_flat[:,i], y_scaler[i]).numpy()
-                y_pred = Z_norm_reverse(predictions_flat[:,i], y_scaler[i]).numpy()
-                if mask is not None or mask.size != 0:
-                    y_mask = mask.reshape(-1, mask.shape[-1])[:,i]
-                    y_true = np.where(y_mask == 0, np.nan, y_true)
-                
-                # LINE PLOT: Days index vs. values
-                ax_line.plot(np.arange(N), y_true, 'o', label='True', color='steelblue', lw=1)
-                ax_line.plot(np.arange(N), y_pred, label='Pred', color='red',lw=1, alpha=0.7)
-                ax_line.set_title(f"{name} over Days")
-                ax_line.set_xlabel("Days Index")
-                ax_line.set_ylabel(name)
-                ax_line.legend(fontsize=8)
-
-            # Tighten up and show
-            sub_title = f"Site {site} Year {year}"
-            fig.suptitle(sub_title, fontsize=12)
-            fig.subplots_adjust(top=0.9, hspace=0.4)
-            plt.show()
-
 # A GRU with Attension Regression Model
 class Attention(nn.Module):
     def __init__(self, hidden_dim):
@@ -759,7 +415,7 @@ class Attention(nn.Module):
         combined = torch.cat([gru_out, context], dim=-1)
         return combined
 
-class GRUSeq2SeqWithAttention(TimeSeriesModel):
+class GRUSeq2SeqWithAttention(TimeSeriesModel_HiddenTransfer):
     def __init__(self, input_dim, hidden_dim, num_layers, output_dim, dropout=0.2):
         super().__init__(input_dim, hidden_dim, num_layers, output_dim, dropout)
         self.gru = nn.GRU(input_dim, hidden_dim, num_layers, batch_first=True)
@@ -767,9 +423,11 @@ class GRUSeq2SeqWithAttention(TimeSeriesModel):
         self.fc = nn.Linear(2*hidden_dim, output_dim)  # Double input size due to concatenation
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x):
+    def forward(self, x, hidden=None):
         # x shape: (batch_size, seq_len, input_dim)
-        gru_out, _ = self.gru(x)  # gru_out shape: (batch_size, seq_len, hidden_dim)
+        if hidden == None:
+            hidden = torch.zeros(self.num_layers, x.size(0), self.hidden_dim).to(x.device)
+        gru_out, hidden = self.gru(x, hidden)  # gru_out shape: (batch_size, seq_len, hidden_dim)
         gru_out = self.dropout(gru_out)
         
         # Apply attention
@@ -777,10 +435,10 @@ class GRUSeq2SeqWithAttention(TimeSeriesModel):
         
         # Final projection
         out = self.fc(attended)  # (batch_size, seq_len, output_dim)
-        return out
+        return out, hidden
      
 # A Simple GRU Regression model
-class GRUSeq2Seq(TimeSeriesModel):
+class GRUSeq2Seq(TimeSeriesModel_HiddenTransfer):
     def __init__(self, input_dim, hidden_dim, num_layers, output_dim):
         super().__init__(input_dim, hidden_dim, num_layers, output_dim)
         self.gru = nn.GRU(input_dim, hidden_dim, num_layers, batch_first=True)
@@ -794,7 +452,7 @@ class GRUSeq2Seq(TimeSeriesModel):
         return out, hidden
     
 # A Simple LSTM Regression model
-class LSTMSeq2Seq(TimeSeriesModel):
+class LSTMSeq2Seq(TimeSeriesModel_HiddenTransfer):
     def __init__(self, input_dim, hidden_dim, num_layers, output_dim):
         """
         Args:
@@ -808,141 +466,19 @@ class LSTMSeq2Seq(TimeSeriesModel):
         # Apply a linear layer to every time step.
         self.fc = nn.Linear(hidden_dim, output_dim)
     
-    def forward(self, x):
+    def forward(self, x, hidden=None):
         # x shape: (batch_size, sequence_length, input_dim)
-        lstm_out, _ = self.lstm(x)  # lstm_out shape: (batch_size, sequence_length, hidden_dim)
+        if hidden == None:
+            h = torch.zeros(self.num_layers, x.size(0), self.hidden_dim).to(x.device)
+            c = torch.zeros(self.num_layers, x.size(0), self.hidden_dim).to(x.device)
+            hidden = (h,c)
+        lstm_out, hidden = self.lstm(x, hidden)  # lstm_out shape: (batch_size, sequence_length, hidden_dim)
         out = self.fc(lstm_out)     # out shape: (batch_size, sequence_length, output_dim)
-        return out
+        return out, hidden
 
-
-### 1D CNN Regression models
-
-# ==============================
-# 1D CNN Model, Time series regression
-# ==============================
-class TemporalCNN(TimeSeriesModel):
-    def __init__(self, input_dim, hidden_dim, num_layers, output_dim, dropout=0.2):
-        super().__init__(input_dim, hidden_dim, num_layers, output_dim, dropout)
-        # Assume seq_len is 365
-        self.cnn = nn.Sequential(
-            # Block 1: Output is (batch_size, 32, seq_len)
-            nn.Conv1d(input_dim, 32, kernel_size=5, padding='same'),
-            nn.BatchNorm1d(32),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            
-            # Block 2: Output is (batch_size, 64, seq_len)
-            nn.Conv1d(32, 64, kernel_size=3, padding='same'),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            
-            # Block 3: Output is (batch_size, 3, seq_len)
-            nn.Conv1d(64, output_dim, kernel_size=1)
-        )
-
-    def forward(self, x):
-        # CNN requires dimmesion as: (batch, channels, seq)
-        x = x.permute(0, 2, 1)  # -> (batch, input_features, 365)
-        out = self.cnn(x)          # (batch, 3, 365)
-        return out.permute(0, 2, 1)  # change back to (batch, 365, 3)
-    
-class CNNLSTM(TimeSeriesModel):
-    def __init__(self, input_dim, hidden_dim, num_layers, output_dim, dropout=0.2):
-        super().__init__(input_dim, hidden_dim, num_layers, output_dim, dropout)
-        
-        # 1D CNN Block: Extract local time series features
-        self.cnn = nn.Sequential(
-            nn.Conv1d(input_dim, 64, kernel_size=5, padding='same'),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            
-            nn.Conv1d(64, 128, kernel_size=3, padding='same'),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-        )
-        
-        # LSTM Block: Extract long time features
-        self.lstm = nn.LSTM(
-            input_size=128,   # input dim = CNN output channels
-            hidden_size=hidden_dim,
-            num_layers=num_layers,
-            bidirectional=True,
-            batch_first=True  # output is (batch, seq, features)
-        )
-        
-        # FC layer
-        self.fc = nn.Sequential(
-            nn.Linear(hidden_dim*2, 128),  # bi-direction LSTM *2
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(128, output_dim)
-        )
-
-    def forward(self, x):
-        # Origin x shape is: (batch_size, 365, input_features)
-        # Change shape for Conv1d: (batch, channels, seq=365)
-        x = x.permute(0, 2, 1)  # -> (batch, input_features, 365)
-        
-        # 1D CNN
-        cnn_out = self.cnn(x)  # (batch, 128, 365)
-        
-        # change shape for LSTM: (batch, seq, features)
-        lstm_input = cnn_out.permute(0, 2, 1)  # -> (batch, 365, 128)
-        
-        # LSTM
-        lstm_out, _ = self.lstm(lstm_input)  # (batch, 365, 512)  (bi-direction, hidden_size*2)
-        
-        # FC layer
-        output = self.fc(lstm_out)  # (batch, 365, 3)
-        return output
-    
-class CNN_LSTM_Attension(CNNLSTM):
-    def __init__(self, input_dim, hidden_dim, num_layers, output_dim, dropout=0.2,attn_heads=8, attn_dropout=0.1):
-        super().__init__(input_dim, hidden_dim, num_layers, output_dim, dropout)
-        # Attension block after LSTM
-        embed_size = self.lstm.hidden_size*2
-        self.attention = nn.MultiheadAttention(embed_dim=embed_size, 
-                                               num_heads=attn_heads,
-                                               dropout=attn_dropout,
-                                                batch_first=True)
-
-        # LayerNorm after the Attension
-        self.norm = nn.LayerNorm(embed_size)
-
-    def forward(self, x):
-        # Input x shape: (batch_size, 365, 16)
-        # Change shape for Conv1d: (batch, channels, seq)
-        x = x.permute(0, 2, 1)  # -> (batch, 16, 365)
-        
-        # 1D CNN
-        cnn_out = self.cnn(x)  # (batch, 128, 365)
-        
-        # Change shape for LSTM: (batch, seq, features)
-        lstm_input = cnn_out.permute(0, 2, 1)  # -> (batch, 365, 128)
-        
-        # LSTM
-        lstm_out, _ = self.lstm(lstm_input)  # (batch, 365, 512)  (bi-direction hidden_size*2)
-
-        # Attension
-        attn_out, _ = self.attention(
-            query=lstm_out,
-            key=lstm_out,
-            value=lstm_out,
-            need_weights=False
-        )
-
-        attn_out = self.norm(attn_out + lstm_out)  # Residual connection
-
-        # FC layer
-        output = self.fc(attn_out)  # (batch, 365, 3)
-        return output
-    
 
 # the 2-cell N2O KGML model from Licheng's 2022 paper
-class N2OGRU_KGML(TimeSeriesModel):
+class N2OGRU_KGML(TimeSeriesModel_HiddenTransfer):
     #input model variables are for each module
     def __init__(self, input_dim, hidden_dim, num_layers, output_dim1, output_dim2, dropout):
         super().__init__(input_dim, hidden_dim, num_layers, output_dim=output_dim1+output_dim2)
@@ -987,7 +523,7 @@ class N2OGRU_KGML(TimeSeriesModel):
 
 
 # the Ra-Rh CO2 KGML model from Licheng's 2024 paper
-class RecoGRU_KGML(TimeSeriesModel):
+class RecoGRU_KGML(TimeSeriesModel_HiddenTransfer):
     def __init__(self, input_dim, hidden_dim, num_layers, output_dim, dropout):
         super().__init__(input_dim, hidden_dim, num_layers, output_dim)
         self.hidden_dim = hidden_dim
