@@ -1,7 +1,7 @@
 # PyKGML: Python library for knowledge-guided machine learning
 ------------------------------------------------------------
 
-PyKGML [(Github repo)](https://github.com/AI4Agriculture/PyKGML_development) is a Python library to facilitate the development of knowledge-guided machine learning (KGML) models in agriculture and forestry. It aims to provide research and educational support with improved accessibility to ML-ready data and code for developing KGML models, testing new algorithms, and providing efficient model benchmarking.
+PyKGML [(GitHub repo)](https://github.com/AI4Agriculture/PyKGML_development) is a Python library to facilitate the development of knowledge-guided machine learning (KGML) models in agriculture and forestry. It aims to provide research and educational support with improved accessibility to ML-ready data and code for developing KGML models, testing new algorithms, and providing efficient model benchmarking.
 
 # Benchmark dataset
 We integrated data from two prior studies to support the functional pipeline of PyKGML. These studies represent pioneering work in agricultural knowledge-guided machine learning (KGML), advancing the simulation of agroecosystem dynamics related to greenhouse gas (GHG) fluxes:
