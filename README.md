@@ -36,9 +36,9 @@ Each file is a serialized Python dictionary containing the following keys and va
 
   The original code of KGMLag-CO2 and KGMLag-N2O and development code of PyKGML are stored in the folder "[development_materials](development_materials)":
     
-  • KGMLag_CO2_pretrain_baseline.py and KGMLag_CO2_finetune_baseline.py are the original code from study 1.
+  • KGMLag_CO2_pretrain_baseline.py and KGMLag_CO2_finetune_baseline.py are the original code from [Liu et al. 2024](https://doi.org/10.5194/gmd-15-2839-2022).
     
-  • KGMLag_N2O_pretrain_baseline.ipynb and KGMLag_N2O_finetune_baseline.ipynb are the original code from study 2.
+  • KGMLag_N2O_pretrain_baseline.ipynb and KGMLag_N2O_finetune_baseline.ipynb are the original code from [Liu et al. 2022](https://www.nature.com/articles/s41467-023-43860-5).
 
   <!-- The baseline code were further modularized to some clean versions: 
     
@@ -166,3 +166,6 @@ Funding sources for this research includes:
 1. This research is part of [AI-LEAF: AI Institute for Land, Economy, Agriculture & Forestry](https://cse.umn.edu/aileaf) and is supported by USDA National Institute of Food and Agriculture (NIFA) and the National Science Foundation (NSF) National AI Research Institutes Competitive Award No. 2023-67021-39829.
 2. The Forever Green Initiative of the University of Minnesota, using funds from the State of Minnesota Clean Water Fund provided by the Minnesota Department of Agriculture.  
 3. National Science Foundation: Signal in the Soil program (award No. 2034385).
+
+# Contact
+Please contact the corresponding author Dr. Licheng Liu (lichengl@umn.edu) to provide your feedback.
