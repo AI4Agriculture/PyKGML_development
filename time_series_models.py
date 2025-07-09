@@ -372,9 +372,9 @@ class TimeSeriesModel(nn.Module):
                     y_mask = batch_y[..., y_num:]
                     y_true = batch_y[..., :y_num] * y_mask
                     y_pred = outputs_pred * y_mask
-                    loss = self.criterion(y_pred, y_true)
+                    loss = self.criterion(y_pred, y_true, batch_x)
                 else:
-                    loss = self.criterion(outputs_pred, batch_y)
+                    loss = self.criterion(outputs_pred, batch_y, batch_x)
 
                 loss.backward()
                 # Gradient clipping
@@ -397,9 +397,9 @@ class TimeSeriesModel(nn.Module):
                         y_mask = batch_y[..., y_num:]
                         y_true = batch_y[..., :y_num] * y_mask
                         y_pred = outputs_pred * y_mask
-                        loss = self.criterion(y_pred, y_true)
+                        loss = self.criterion(y_pred, y_true, batch_x)
                     else:
-                        loss = self.criterion(outputs_pred, batch_y)
+                        loss = self.criterion(outputs_pred, batch_y, batch_x)
                     
                     test_losses.append(loss.item())
             
@@ -454,7 +454,7 @@ class TimeSeriesModel(nn.Module):
                     y_true = outputs_pred
                     y_pred = batch_y
                 
-                loss = self.criterion(y_pred, y_true)
+                loss = self.criterion(y_pred, y_true, batch_x)
                 test_losses.append(loss.item())
                 
                 # Save predictions and targets for further analysis
