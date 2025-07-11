@@ -19,38 +19,22 @@ Each file is a serialized Python dictionary containing the following keys and va
             'X_test': X_test,
             'Y_train': Y_train,
             'Y_test': Y_test,
+            'x_scaler': x_scaler,
             'y_scaler': y_scaler,
             'input_features': input_features,
             'output_features': output_features} 
 
 ### Files 
-  • **dataset.py** is used to prepare demo datasets for pretraining and fine-tuning: Step2_DataSet is the CO2 synthetic dataset for pretraining, and Step5_DataSet is the CO2 flux tower dataset for fine- 
-  tuning. N2O_synthetic_dataset and N2O_mesocosm_dataset are the N2O pretraining and fine-tuning datasets, respectively.
+  • **unified_model_processing.ipynb** is a jupyter notebook to demonstrate the use of PyKGML. 
+
+  • **time_series_models.py** defines model classes and the processes for data preparation, model training and testing. 
+
+  • **dataset.py** is used to prepare the example datasets: 'CO2_synthetic_dataset' generates the CO2 pretraining dataset and 'CO2_fluxtower_dataset' generates the CO2 fine-tuning dataset. 'N2O_synthetic_dataset' and 'N2O_mesocosm_dataset' prepare the N2O pretraining dataset and the N2O fine-tuning dataset, respectively. 
   
-  • **kgml_lib.py** contains utility functions such as for normalization (Z_norm) and computing coefficient of determination (R2Loss).
-  
-  • **time_series_models.py** assembles classes of model, and implement the processes of data preparation, model training and testing.
-  
-  • **unified_model_processing.ipynb** is a jupyter notebook to demonstrate the use of PyKGML.  
+  • **kgml_lib.py** defines utility functions such as normalization (Z_norm) and  coefficient of determination computation (R2Loss).
   
 
-  The original code of KGMLag-CO2 and KGMLag-N2O and development code of PyKGML are stored in the folder "[development_materials](development_materials)":
-    
-  • KGMLag_CO2_pretrain_baseline.py and KGMLag_CO2_finetune_baseline.py are the original code from [Liu et al. 2024](https://doi.org/10.5194/gmd-15-2839-2022).
-    
-  • KGMLag_N2O_pretrain_baseline.ipynb and KGMLag_N2O_finetune_baseline.ipynb are the original code from [Liu et al. 2022](https://www.nature.com/articles/s41467-023-43860-5).
-
-  <!-- The baseline code were further modularized to some clean versions: 
-    
-    - KGMLag_CO2_pretrain_modularized.py are the modularized version of KGMLag_CO2_pretrain_baseline.py.
-    
-    - KGMLag_CO2_finetune_modularized.py are the modularized version of KGMLag_CO2_finetune_baseline.py.
-    
-    - KGMLag_N2O_modularized.py are the modularized version combining KGMLag_N2O_pretrain_baseline.py and KGMLag_N2O_finetune_baseline.py.
-    
-    - test_KGMLag_CO2_pretrain.ipynb is a testing call on KGMLag_CO2_pretrain_modularized.py
-    
-    - test_KGMLag_CO2_finetune.ipynb is a testing call on KGMLag_CO2_finetune_modularized.py -->
+  The development materials of PyKGML including original code of KGMLag-CO2 and KGMLag-N2O are stored in the folder "[development_materials](development_materials)".
 
 ### Using PyKGML
 
@@ -72,7 +56,7 @@ Each file is a serialized Python dictionary containing the following keys and va
     train_dataset = SequenceDataset(X_train, Y_train, sequence_length)
     test_dataset = SequenceDataset(X_test, Y_test, sequence_length)
 
-**Model set up:**
+**Model setup:**
 
     model = GRUSeq2SeqWithAttention(input_dim, hidden_dim, num_layers, output_dim, dropout)
     model.train_loader = DataLoader(train_dataset, batch_size, shuffle=True)
@@ -86,12 +70,12 @@ Each file is a serialized Python dictionary containing the following keys and va
     # loss function
     loss_function = nn.L1Loss()
 
-**Model training and testing:**
+**Training and testing:**
 
     model.train_model(loss_fun=loss_function, LR=learning_rate, step_size=step_size, gamma=gamma, maxepoch=max_epoch)
     model.test()
 
-More details about using PyKGML can be found in unified_model_processing.ipynb
+More details about using PyKGML can be found in [unified_model_processing.ipynb](unified_model_processing.ipynb).
 
 
 # Benchmark dataset
@@ -133,27 +117,20 @@ Two datasets were harmonized using the CO<sub>2</sub> flux dataset from study 1 
 
 
 # PyKGML development
-There are several strategies that can be leveraged to incoporate domain knowledge into the development of a KGML model, as explored and summarized in the two references ([Liu et al. 2022](https://doi.org/10.5194/gmd-15-2839-2022), [Liu et al. 2024](https://www.nature.com/articles/s41467-023-43860-5)):
+In PyKGML, we functionize several strategies for incoporating domain knowledge into the development of a KGML model a user-friendly way. Those strategies were explored and summarized in the two references ([Liu et al. 2022](https://doi.org/10.5194/gmd-15-2839-2022), [2024](https://www.nature.com/articles/s41467-023-43860-5)):
 1. Knowledge-guided initialization through pre-training with synthetic data generated generated by process-based models.
 2. Knowledge-guided loss function design according to physical or chemical laws in ecosystems, such as mass balance, non-negative.
 3. Hierarchical architecture design according to causal relations or adding dense layers containing domain knowledge.
-4. Residual modeling with ML models to reduce the bias between PB model outputs and observations.
-5. Other hybrid modeling approaches combining PB and ML models.  
 
-In PyKGML, we aim to functionize strategies 1-3 in a user-friendly way, so that a user can develop a KGML model without compelx coding but by providing the design idea and data:
-1. Pre-training strategy will be enabled as a model training step using provided data. 
-2. Loss function design will be enabled in a way that converts a equation from the user to a constrained loss function in the ML model.
-3. Architecture design will be enabled in a way that translate a user's idea of combining ML layers and blocks into functional code.
+Loss function and model architecture design is proposed in a way that converts user's idea from intuitive script to functional code. **In the current version, those design functions has been realized in a preliminary way, and refinement is underway.**
 
-**In this current version of PyKGML, loss function design has been realized in a preliminary way, and the function of architecture design is still under development.**  We set loss function as a input parameter for model training so that users can select a popular loss function from other libraries, e.g. MAE loss or MSE loss in Pytorch, or define their own loss functions.
+Models of KGMLag-CO2 and KGMLag-N2O were added to the model gallery of PyKGML so users can adopt these previously tested architectures for training or fine-tuning. Please note that the KGMLag-CO2 and KGMLag-N2O models in PyKGML only include the final deployable architectures of the original models, and do not include the strategies involved in pretraining and fine-tuning steps to improve the model performances. Instead, we generalize the process of model pre-training and fine-tuning for all models included in the gallery.
 
-Models of KGMLag-CO2 and KGMLag-N2O were added to the model gallary of PyKGML so  users can adopt the tested architecture for training or fine-tuning. To make it clear, the KGMLag-CO2 and KGMLag-N2O models in PyKGML only refer to the architectures of the original models, not including the strategies involved in pretraining and fine-tuning steps to improve the model perforamnces. Instead, we generalize the process of model pre-training and fine-tuning for KGMLag-CO2, KGMLag-N2O, and pure ML models using the same datasets.
-
-**Model gallary**:
+**Model gallery**:
   * Attention
-  * GRUSeq2SeqWithAttention
   * GRUSeq2Seq
   * LSTMSeq2Seq
+  * GRUSeq2SeqWithAttention
   * 1dCNN
   * RelPositionalEncoding
   * TimeSeriesTransformer
