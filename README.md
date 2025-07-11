@@ -34,7 +34,7 @@ Each file is a serialized Python dictionary containing the following keys and va
   • **kgml_lib.py** defines utility functions such as normalization (Z_norm) and  coefficient of determination computation (R2Loss).
   
 
-  The development materials of PyKGML including original code of KGMLag-CO2 and KGMLag-N2O are stored in the folder "[development_materials](development_materials)".
+  The development materials of PyKGML including original code of KGMLag-CO2 and KGMLag-N2O are stored in the folder [development_materials](development_materials).
 
 ### Using PyKGML
 
