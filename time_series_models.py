@@ -14,6 +14,8 @@ from sklearn.multioutput import MultiOutputRegressor
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 import scipy.stats as stats
 
+import inspect
+
 def Z_norm_reverse(X,Xscaler,units_convert=1.0):
     return (X*Xscaler[1]+Xscaler[0])*units_convert
 
@@ -332,7 +334,7 @@ class TimeSeriesModel(nn.Module):
             print(param_tensor, "\t", self.model.state_dict()[param_tensor].size())
 
 
-    def train_model(self, loss_fun, LR=0.001,step_size=20, gamma=0.8, maxepoch=80, use_y_mask = False):
+    def train_model(self, loss_func, LR=0.001,step_size=20, gamma=0.8, maxepoch=80, use_y_mask = False):
         # Initial parameters
         self.train_losses = []
         self.val_losses = []
@@ -341,7 +343,17 @@ class TimeSeriesModel(nn.Module):
         y_num = self.output_dim  # output features number
 
         self.to(self.device)
-        self.criterion = loss_fun # nn.L1Loss() # nn.MSELoss() # For regression
+        self.criterion = loss_func # nn.L1Loss() # nn.MSELoss() # For regression
+        # check if customized loss function
+        sig = inspect.signature(loss_func.forward)
+        num_params = len(sig.parameters)
+        if num_params == 3: # customized loss function
+            self.b_customized_loss = True
+        elif num_params == 2:  # pytorch loss function, like nn.MSELoss
+            self.b_customized_loss = False
+        else:
+            raise ValueError("The loss function error.")
+
         optimizer = optim.Adam(self.parameters(), lr=LR)
 
         num_epochs = maxepoch  # Adjust as needed
@@ -372,9 +384,14 @@ class TimeSeriesModel(nn.Module):
                     y_mask = batch_y[..., y_num:]
                     y_true = batch_y[..., :y_num] * y_mask
                     y_pred = outputs_pred * y_mask
+                else:
+                    y_true = batch_y
+                    y_pred = outputs_pred
+
+                if self.b_customized_loss == True:
                     loss = self.criterion(y_pred, y_true, batch_x)
                 else:
-                    loss = self.criterion(outputs_pred, batch_y, batch_x)
+                    loss = self.criterion(y_pred, y_true)
 
                 loss.backward()
                 # Gradient clipping
@@ -397,10 +414,15 @@ class TimeSeriesModel(nn.Module):
                         y_mask = batch_y[..., y_num:]
                         y_true = batch_y[..., :y_num] * y_mask
                         y_pred = outputs_pred * y_mask
+                    else:
+                        y_true = batch_y
+                        y_pred = outputs_pred
+                    
+                    if self.b_customized_loss == True:
                         loss = self.criterion(y_pred, y_true, batch_x)
                     else:
-                        loss = self.criterion(outputs_pred, batch_y, batch_x)
-                    
+                        loss = self.criterion(y_pred, y_true)
+
                     test_losses.append(loss.item())
             
             avg_test_loss = np.mean(test_losses)
@@ -451,10 +473,13 @@ class TimeSeriesModel(nn.Module):
                     y_true = batch_y[..., :y_num] * y_mask
                     y_pred = outputs_pred * y_mask
                 else:
-                    y_true = outputs_pred
-                    y_pred = batch_y
+                    y_true = batch_y
+                    y_pred = outputs_pred
                 
-                loss = self.criterion(y_pred, y_true, batch_x)
+                if self.b_customized_loss == True:
+                    loss = self.criterion(y_pred, y_true, batch_x)
+                else:
+                    loss = self.criterion(y_pred, y_true)
                 test_losses.append(loss.item())
                 
                 # Save predictions and targets for further analysis
