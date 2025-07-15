@@ -98,9 +98,9 @@ Two datasets were harmonized using the CO<sub>2</sub> flux dataset from study 1 
   * Input variables (19):
     - Meterological (7): solar radiation (RADN), max air T (TMAX_AIR), (max-min) air T (TDIF_AIR), max air humidity (HMAX_AIR), (max-min) air humidity (HDIF_AIR), wind speed (WIND), precipitation (PRECN).
     - Soil properties (9): bulk density (TBKDS), sand content (TSAND), silt content (TSILT), field capacity (TFC), wilting point (TWP), saturate hydraulic conductivity (TKSat), soil organic carbon concetration (TSOC), pH (TPH), cation exchange capacity (TCEC)
-    - Other: crop type (Crop_Type), gross primary productivity (GPP)
+    - Other (3): year (Year), crop type (Crop_Type), gross primary productivity (GPP)
   * Output variables (3):
-    - Autotrophic respiration (Ra), heterotrophic respiration (Rh), carbon mass of grain (GrainC).
+    - Autotrophic respiration (Ra), heterotrophic respiration (Rh), net ecosystem exchange (NEE).
 2. **N<sub>2</sub>O dataset:** 
   * Synthetic data of *ecosys*:
     - 1980 simulations at 99 counties x 20 N-fertilizer rates in the 3I states (Illinois, Iowa, Indiana).
@@ -113,7 +113,7 @@ Two datasets were harmonized using the CO<sub>2</sub> flux dataset from study 1 
     - Soil properties (6): bulk density (TBKDS), sand content (TSAND), silt content (TSILT), pH (TPH), cation exchange capacity (TCEC), soil organic carbon concetration (TSOC)
     - Management (3): N-fertilizer rate (FERTZR_N), planting day of year (PDOY), crop type (PLANTT).
   * Output variables (3):
-    - N<sub>2</sub>O FLUX (N2O_FLUX), soil CO<sub>2</sub> flux (CO2_FLUX), soil water content at 10 cm (WTR_3), soil ammonium concentration at 10 cm (NH4_3), soil nitrate concentration at 10 cm (NO3_3).
+    - N<sub>2</sub>O fluxes (N2O_FLUX), soil CO<sub>2</sub> fluxes (CO2_FLUX), soil water content at 10 cm (WTR_3), soil ammonium concentration at 10 cm (NH4_3), soil nitrate concentration at 10 cm (NO3_3).
 
 
 # PyKGML development
@@ -132,7 +132,6 @@ Models of KGMLag-CO2 and KGMLag-N2O were added to the model gallery of PyKGML so
   * LSTMSeq2Seq
   * GRUSeq2SeqWithAttention
   * 1dCNN
-  * RelPositionalEncoding
   * TimeSeriesTransformer
   * N2OGRU_KGML (This is the model architecture of KGMLag-N2O from [Liu et al., 2022](https://doi.org/10.5194/gmd-15-2839-2022))
   * RecoGRU_KGML (This is the model architecture of KGMLag-CO2 from [Liu et al., 2024](https://www.nature.com/articles/s41467-023-43860-5)) 
