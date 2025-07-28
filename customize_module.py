@@ -258,7 +258,7 @@ class FlexibleModelCompiler:
             fn = spec[0].lower()
             args = spec[1:]
             if fn in ('gru', 'lstm'):
-                inp, hid, nl, dp, outp = args
+                inp, hid, nl, dp, *rest = args
                 cls = 'nn.GRU' if fn == 'gru' else 'nn.LSTM'
                 lines.append(
                     f"        self.{attr} = {cls}("
@@ -283,13 +283,13 @@ class FlexibleModelCompiler:
             elif fn in ('sequential', 'nn.sequential'):
                 # args are module definition strings
                 lines.append(f"        self.{attr} = nn.Sequential(")
-                for module_str in args[:-1]:
+                for module_str in args:
                     lines.append(f"            {module_str},")
                 # remove trailing comma from last
                 lines[-1] = lines[-1].rstrip(',')
                 lines.append(f"        )")
             else:
-                args_list = ', '.join(map(str, args[:-1]))
+                args_list = ', '.join(map(str, args[:-1])) # the last is the output dimmension
                 lines.append(f"        self.{attr} = {fn}({args_list})")
 
         # forward method
@@ -391,7 +391,7 @@ if __name__ == '__main__':
             'fc':        ('linear', 'hidden_dim', '1'),
             'attn1':      ('Attention', 'hidden_dim', 'hidden_dim*2'),
             'attn2': ('Sequential', 'nn.Linear(hidden_dim, 64)', 'nn.ReLU()', 'nn.Linear(64, 64)', 'nn.ReLU()', 
-                      'nn.Linear(64, 32)', 'nn.ReLU()', 'nn.Linear(32, 1)', 'nn.Tanh()', '1'),
+                      'nn.Linear(64, 32)', 'nn.ReLU()', 'nn.Linear(32, 1)', 'nn.Tanh()'),
             'attn3': ('my_attention', 'hidden_dim', '1'),
             'attn4': ('dual_attention', 'hidden_dim', 'hidden_dim + hidden_dim')
         },
@@ -427,7 +427,7 @@ if __name__ == '__main__':
             'gru_basic': ('gru', 'input_dim', 'hidden_dim', 'num_layers', 'dropout'), # basic
             'gru_ra':    ('gru', 'input_dim + 2*hidden_dim', 'hidden_dim', 'num_layers', 'dropout'), # Ra prediction
             'gru_rh':    ('gru', 'input_dim + 2*hidden_dim', 'hidden_dim', '1', '0'),
-            'gru_nee':   ('gru', 'input_dim+2', 'hidden_dim', '1', '0'), #
+            'gru_nee':   ('gru', 'input_dim+2', 'hidden_dim', '1', '0'), 
             'dropout':   ('dropout', 'dropout'),
             'fc':        ('linear', 'hidden_dim', '1'),
             'attn1':      ('Attention', 'hidden_dim', 'hidden_dim*2'),
@@ -505,10 +505,11 @@ if __name__ == '__main__':
     }
 
     
-    print("\n")
+    print("\n\n")
     
     Compiler1 = FlexibleModelCompiler(config_kgml_2)
     Compiler1.check_configuration()
+    Compiler1.generate_model()
 
     Compiler1 = FlexibleModelCompiler(config_attn)
     Compiler1.check_configuration()
