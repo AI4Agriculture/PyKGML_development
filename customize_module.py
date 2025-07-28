@@ -224,7 +224,7 @@ class FlexibleModelCompiler:
                         print(f"Warning check {param} in the {expr}")
 
                     if input_para_dim_value != layer_required_dim:
-                        print(f"Warning check {param} in the {expr}")
+                        print(f"Warning check {param} in the {expr}. The {param} dim is {input_para_dim_value}, but layer {fn} required {input_dim} is {layer_required_dim}")
 
 
     def generate_model(self):
