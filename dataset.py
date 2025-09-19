@@ -182,7 +182,7 @@ class CO2_fluxtower_dataset:
         self.f_names = self.fts_names_1 + ['Year']+ self.fsp_names # total 9+ 1+ 9 features
         self.n_f = len(self.f_names) # The number of features, now is 19 features
 
-        self.device = torch.device("cuda")
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     def load_scaler_data(self, scaler_file):
         data0 = torch.load(self.data_path + scaler_file, weights_only=False)

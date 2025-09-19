@@ -26,7 +26,7 @@ Each file is a serialized Python dictionary containing the following keys and va
 
 ### Files 
 
-  • **unified_model_processing.ipynb** is a jupyter notebook to demonstrate the use of PyKGML. Different version of PyKGML will have seperate files, i.e. unified_model_processing_v1.ipynb for version 1, to track the change in demonstration of functions.
+  • **unified_model_processing.ipynb** is a jupyter notebook to demonstrate the use of PyKGML. 
 
   • **time_series_models.py** defines model classes and the processes for data preparation, model training and testing. 
 
@@ -39,24 +39,32 @@ Each file is a serialized Python dictionary containing the following keys and va
   • **customize_module.py** defines a compiler for customizing model structures. Users can design a model structure through a intuitive script. Example can be found in **unified_model_processing.ipynb**.
 
   The development materials of PyKGML including original code of KGMLag-CO2 and KGMLag-N2O are stored in the folder [development_materials](development_materials).
-<!--     
-  • **KGMLag_CO2_pretrain_baseline.py** and **KGMLag_CO2_finetune_baseline.py** are the original code from [Liu et al. 2024](https://doi.org/10.5194/gmd-15-2839-2022).
-    
-  • **KGMLag_N2O_pretrain_baseline.ipynb** and **KGMLag_N2O_finetune_baseline.ipynb** are the original code from [Liu et al. 2022](https://www.nature.com/articles/s41467-023-43860-5).
 
-  The baseline code were further modularized to some clean versions: 
-    
-    - KGMLag_CO2_pretrain_modularized.py are the modularized version of KGMLag_CO2_pretrain_baseline.py.
-    
-    - KGMLag_CO2_finetune_modularized.py are the modularized version of KGMLag_CO2_finetune_baseline.py.
-    
-    - KGMLag_N2O_modularized.py are the modularized version combining KGMLag_N2O_pretrain_baseline.py and KGMLag_N2O_finetune_baseline.py.
-    
-    - test_KGMLag_CO2_pretrain.ipynb is a testing call on KGMLag_CO2_pretrain_modularized.py
-    
-    - test_KGMLag_CO2_finetune.ipynb is a testing call on KGMLag_CO2_finetune_modularized.py -->
 
 ### Using PyKGML
+
+**Environment**  
+We use Jupyter Notebook ([try it online or install locally](https://docs.jupyter.org/en/stable/start/)) for Python to example PyKGML usage on both cloud and local environments:  
+  1. **Google Colab** (recommended for new users): is a hosted Jupyter Notebook service that requires no setup to use and provides free access to computing resources including GPUs. To get started with Google Colab, please refer to [Colab's official tutorial](https://colab.research.google.com/). The Colab notebook on PyKGML demonstration is [Tutorial_co2_colab.ipynb](Tutorial_co2_colab.ipynb).
+
+  2. **Local**: The notebook on local PyKGML demonstration is [Tutorial_co2_local.ipynb](Tutorial_co2_local.ipynb). To use this notebook, The following applications and packages are required:  
+      - Python 3 ([download](https://www.python.org/downloads/))  
+      - Jyputer Notebook ([installation](https://docs.jupyter.org/en/stable/install/notebook-classic.html)).  
+      - Python packages ([installation guidance](https://packaging.python.org/en/latest/tutorials/installing-packages/)):  
+        - numpy  
+        - pandas  
+        - torch  
+        - subprocess  
+        - ast  
+        - collections  
+        - re  
+        - matplotlib  
+        - sklearn  
+        - scipy  
+        - inspect  
+
+****
+**Get started** with the PyKGML tutorial, [Tutorial_co2_colab.ipynb](Tutorial_co2_colab.ipynb) or [Tutorial_co2_local.ipynb](Tutorial_co2_local.ipynb).  
 
 **Import a model and the data preparer:**  
 
@@ -158,32 +166,59 @@ Study 1 developed KGML models to predict N<sub>2</sub>O fluxes using *ecosys* sy
 
 Two datasets were harmonized using the CO<sub>2</sub> flux dataset from study 2 and and the N<sub>2</sub>O flux dataset from study 1 to demonstrate the use of PyKGML:
 1. **CO<sub>2</sub> dataset:**
-  * Synthetic data of *ecosys*:
-    - 100 simulations at random corn fields in the Midwest.
-    - Daily sequences over 18 years (2000-2018).
-  * Field observations:
-    - Eddy-covariance observations from 11 flux towers in the Midwest.
-    - A total of 102 site-years of daily sequences.
-  * Input variables (19):
+  * co2_pretrain_data:  
+    - 100 samples (100 sites).
+    - Each sample is a 6570 daily sequence over 18 years (2001-2018). 
+    - 19 input_features and 3 output_features.    
+    - Data split: the first 16 years for training, and the last two years for testing.
+
+    Input features (19):
     - Meterological (7): solar radiation (RADN), max air T (TMAX_AIR), (max-min) air T (TDIF_AIR), max air humidity (HMAX_AIR), (max-min) air humidity (HDIF_AIR), wind speed (WIND), precipitation (PRECN).
     - Soil properties (9): bulk density (TBKDS), sand content (TSAND), silt content (TSILT), field capacity (TFC), wilting point (TWP), saturate hydraulic conductivity (TKSat), soil organic carbon concetration (TSOC), pH (TPH), cation exchange capacity (TCEC)
     - Other (3): year (Year), crop type (Crop_Type), gross primary productivity (GPP)
-  * Output variables (3):
-    - Autotrophic respiration (Ra), heterotrophic respiration (Rh), net ecosystem exchange (NEE).
+
+    Output features (3):
+    - Autotrophic respiration (Ra), heterotrophic respiration (Rh), net ecosystem exchange (NEE). 
+      
+  * co2_finetune_data:  
+    - One sample (11 sites were concatenated into one sequence due to their varied sequence lengths).
+    - A Daily sequence of total 124 site-years (45260 in length).
+    - 19 input_features and 2 output_features.
+    - Data split: the last two years of each site were combined as the testing data, and the rest were included in the training data.  
+
+    Input features (19):
+    - The same as co2_pretrain_data.  
+    
+    Output features (2):
+    - Ecosystem respiration (Reco, Reco = Ra + Rh), net ecosystem exchange (NEE). 
+
 2. **N<sub>2</sub>O dataset:** 
-  * Synthetic data of *ecosys*:
-    - 1980 simulations at 99 counties x 20 N-fertilizer rates in the 3I states (Illinois, Iowa, Indiana).
-    - Daily sequences over 18 years (2000-2018).
-  * Field observations:
-    - 6 chamber observations in a mesocosm environment facility at the University of Minnesota.
-    - Daily sequences of 122 days x 3 years (2016-2018) x 1000 augmentations from hourly data at each chamber.
-  * input variables (16):
+  * n2o_pretrain_data:
+    - 1980 simulations at 99 counties x 20 N-fertilizer rates in the 3I states (Illinois, Iowa, Indiana); synthetic data generated by ecosys.
+    - Daily sequences over 18 years (2001-2018).
+    - Data split: the first 16 years for training, and the last two years for testing.
+
+    Input variables (16):  
     - Meterological (7): solar radiation (RADN), max air T (TMAX_AIR), min air T (TMIN_AIR), max air humidity (HMAX_AIR), min air humidity (HMIN_AIR), wind speed (WIND), precipitation (PRECN).
     - Soil properties (6): bulk density (TBKDS), sand content (TSAND), silt content (TSILT), pH (TPH), cation exchange capacity (TCEC), soil organic carbon concetration (TSOC)
     - Management (3): N-fertilizer rate (FERTZR_N), planting day of year (PDOY), crop type (PLANTT).
-  * Output variables (3):
+
+    Output variables (3):
     - N<sub>2</sub>O fluxes (N2O_FLUX), soil CO<sub>2</sub> fluxes (CO2_FLUX), soil water content at 10 cm (WTR_3), soil ammonium concentration at 10 cm (NH4_3), soil nitrate concentration at 10 cm (NO3_3).
 
+  * n2o_finetune_augment_data:
+    - Observations of 6 chambers in a mesocosm environment.
+    - Daily sequences of 122 days x 3 years (2016-2018).
+    - 1000 augmentations from hourly data at each chamber (6000 x 122 x 3 in total length).
+    - Data split: 5 chambers as the training data, and the other one as the testing data.
+
+    Input variables (16):  
+    - Meterological (7): solar radiation (RADN), max air T (TMAX_AIR), min air T (TMIN_AIR), max air humidity (HMAX_AIR), min air humidity (HMIN_AIR), wind speed (WIND), precipitation (PRECN).
+    - Soil properties (6): bulk density (TBKDS), sand content (TSAND), silt content (TSILT), pH (TPH), cation exchange capacity (TCEC), soil organic carbon concetration (TSOC)
+    - Management (3): N-fertilizer rate (FERTZR_N), planting day of year (PDOY), crop type (PLANTT).
+
+    Output variables (3):
+    - N2O fluxes (N2O_FLUX), soil CO2 fluxes (CO2_FLUX), soil water content at 10 cm (WTR_3), soil ammonium concentration at 10 cm (NH4_3), soil nitrate concentration at 10 cm (NO3_3).
 
 # PyKGML development
 In PyKGML, we functionize several strategies for incoporating domain knowledge into the development of a KGML model a user-friendly way. Those strategies were explored and summarized in the two references ([Liu et al. 2022](https://doi.org/10.5194/gmd-15-2839-2022), [2024](https://www.nature.com/articles/s41467-023-43860-5)):
@@ -191,8 +226,8 @@ In PyKGML, we functionize several strategies for incoporating domain knowledge i
 2. Knowledge-guided loss function customization according to physical or chemical laws in ecosystems, such as mass balance.
 3. Hierarchical architecture design according to causal relationships.
 
-**Version 1** of PyKGML focused on building functions for easy pre-training and fine-tuning.   
-**Version 2** of PyKGML have realized loss function customization and model architecture design in a way to convert user's idea from an intuitive configuration script to a function or model using the loss function compiler or architecture compiler. Refer to [unified_model_processing_v2.ipynb](unified_model_processing_v2.ipynb) for using examples. 
+
+PyKGML have realized loss function customization and model architecture design in a way to convert user's idea from an intuitive configuration script to a function or model using the loss function compiler or architecture compiler. Refer to [unified_model_processing.ipynb](unified_model_processing_v2.ipynb) for using examples. 
 
 Models of KGMLag-CO2 and KGMLag-N2O were added to the model gallery of PyKGML so users can adopt these previously tested architectures for training or fine-tuning. Please note that the KGMLag-CO2 and KGMLag-N2O models in PyKGML only include the final deployable architectures of the original models, and do not include the strategies involved in pretraining and fine-tuning steps to improve the model performances. Instead, we generalize the process of model pre-training and fine-tuning for all models included in the gallery.
 

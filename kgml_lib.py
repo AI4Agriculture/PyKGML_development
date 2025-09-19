@@ -7,31 +7,30 @@
 ## Proprietary and confidential Written by DBRP authors of above manuscript
 #############################################################################
 import numpy as np
+import pandas as pd
 import math
-import os
 from io import open
-import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
 import subprocess as sp
-import os
-import copy
+import matplotlib.pyplot as plt
+import scipy.stats as stats
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 
 ##########################################################################################
 #basic functions
 #
 ##########################################################################################
 class R2Loss(nn.Module):
-    #calculate coefficient of determination
+    #calculate coefficient of determination r2
     def forward(self, y_pred, y):
         var_y = torch.var(y, unbiased=False)
         return 1.0 - F.mse_loss(y_pred, y, reduction="mean") / var_y
 
-class R2Loss_mul(nn.Module):
+class R2Loss_featurewise(nn.Module):
     def forward(self, y_pred, y):
-        # Compute variance per feature across the sequence dimension
+        # Compute R2 per feature across the sequence dimension
         var_y = torch.var(y, dim=1, unbiased=False)  # Shape: [N, feature]
         mse_loss = F.mse_loss(y_pred, y, reduction="none")  # Shape: [N, sequence, feature]
         mse_loss = torch.mean(mse_loss, dim=1)  # Average over the sequence dimension, shape: [N, feature]
@@ -129,333 +128,227 @@ def sample_data_FN(X, Y, fn_ind):
             Y_new = torch.cat((Y_new,Y[t-30:t+90,:,:]),1)
     return X_new,Y_new
 
+def my_loss(output, target):
+    loss = torch.mean((output - target)**2)
+    return loss
+#for multi-task learning, sumloss
+def myloss_mul_sum(output, target,loss_weights):
+    loss = 0.0
+    nout=output.size(2)
+    for i in range(nout):
+        loss = loss + loss_weights[i]*torch.mean((output[:,:,i] - target[:,:,i])**2)
+    return loss
+
+
+def get_R2_score(target, prediction, y_scaler:list, output_feature_name:list):
+    y_param_num = target.shape[-1]
+    prediction_flat = prediction.reshape(-1,y_param_num)
+    target_flat = target.reshape(-1,y_param_num)
+    for i in range(y_param_num):
+        _r2 = r2_score(Z_norm_reverse(target_flat[:,i], y_scaler[i]), Z_norm_reverse(prediction_flat[:,i], y_scaler[i]))
+        print(f"Feature {output_feature_name[i]} R2 Score is: {_r2}")
+
+
 
 ##########################################################################################
-#Models
+#plotting functions
 #
 ##########################################################################################
-
-# use Reco model v1--GRU model
-class RecoGRU_multitask_v8_1(nn.Module):
-    def __init__(self, ninp, dropout, seq_len, GPP_scaler, Ra_scaler, Yield_scaler,Res_scaler,GPP_Res_fmean):
-        super(RecoGRU_multitask_v8_1, self).__init__()
-        nhid = 64
-        nlayers = 2
-        self.nhid = nhid
-        self.nlayers = nlayers
-        self.GPP_scaler = GPP_scaler
-        self.Ra_scaler = Ra_scaler
-        self.Yield_scaler = Yield_scaler
-        self.Res_scaler = Res_scaler
-        self.GPP_Res_fmean = GPP_Res_fmean
-        self.seq_len = seq_len
-        self.gru_basic = nn.GRU(ninp, nhid,nlayers,dropout=dropout, batch_first=True)
-        self.gru_Ra = nn.GRU(nhid+ninp, nhid,1,batch_first=True)
-        self.gru_RhNEE = nn.GRU(nhid+ninp+1, nhid,nlayers,dropout=dropout, batch_first=True)#+1 means res ini 
-        self.drop=nn.Dropout(dropout)
-        self.densor_Ra = nn.Linear(nhid, 1)
-        self.densor_RhNEE = nn.Linear(nhid, 2)
-        #attn for yield prediction
-        self.attn = nn.Sequential(
-            nn.Linear(nhid, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Linear(32, 1),
-            nn.Tanh()
-        )
-        self.densor_yield = nn.Sequential(
-            nn.Linear(nhid, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Linear(32, 1)
-        )
-        self.ReLU=nn.ReLU()
-        self.init_weights()
-
-    def init_weights(self):
-        initrange = 0.1 #may change to a small value
-        self.densor_Ra.bias.data.zero_()
-        self.densor_Ra.weight.data.uniform_(-initrange, initrange)
-        self.densor_RhNEE.bias.data.zero_()
-        self.densor_RhNEE.weight.data.uniform_(-initrange, initrange)
-        for ii in range(4):
-            self.attn[ii*2].bias.data.zero_()
-            self.attn[ii*2].weight.data.uniform_(-initrange, initrange)
-            self.densor_yield[ii*2].bias.data.zero_()
-            self.densor_yield[ii*2].weight.data.uniform_(-initrange, initrange)
-        
-
-    def forward(self, inputs, hidden):
-        output, hidden1 = self.gru_basic(inputs, hidden[1])
-        #predict yield
-        inputs2 = self.drop(output)
-        attn_weights = F.softmax(self.attn(inputs2), dim=1).view(inputs.size(0),1,inputs.size(1))
-        inputs2 = torch.bmm(attn_weights,inputs2)
-        output2 = self.densor_yield(inputs2)
-        
-        #predict flux
-        #Ra
-        output1 , hidden2 = self.gru_Ra(torch.cat((self.drop(output),inputs), 2), hidden[2])
-        Ra = self.densor_Ra(self.drop(output1))
-        
-        #RhNEE
-        Res_ini = hidden[0]
-        output1, hidden3  = self.gru_RhNEE(torch.cat((Res_ini.repeat(1,self.seq_len,1),\
-                                                      self.drop(output),inputs), 2), hidden[3])
-        output1 = torch.cat((Ra,self.densor_RhNEE(self.drop(output1))),2)
-
-        #caculate annual Res
-        #Annual GPP+ Annual Ra - Yield, GPP is no.8 inputs
-        annual_GPP = torch.sum(Z_norm_reverse(inputs[:,:,8],self.GPP_scaler),dim=1).view(-1,1,1)
-        annual_Ra = torch.sum(Z_norm_reverse(Ra[:,:,0],self.Ra_scaler),dim=1).view(-1,1,1)
-        annual_Yield = Z_norm_reverse(output2[:,0,0],self.Yield_scaler).view(-1,1,1)
-        #control 0< Res_ini < GPP
-        Res_ini = self.ReLU(annual_GPP+annual_Ra - annual_Yield)
-        Res_ini[Res_ini > annual_GPP] = annual_GPP[Res_ini > annual_GPP]
-        #scale Res_ini
-        Res_ini = Z_norm_with_scaler(Res_ini,self.Res_scaler)
-        
-        return output1, output2, (Res_ini,hidden1,hidden2,hidden3)
-#bsz should be batch size
-    def init_hidden(self, bsz,GPP_total):
-        Res_ini = (torch.sum(Z_norm_reverse(GPP_total,self.GPP_scaler,1.0),dim=1)/ \
-                  (float(GPP_total.size(1))/float(self.seq_len))/self.GPP_Res_fmean).view(-1,1,1)
-        Res_ini = Z_norm_with_scaler(Res_ini,self.Res_scaler)
-        weight = next(self.parameters())
-        return (Res_ini,
-                weight.new_zeros(self.nlayers, bsz, self.nhid),
-                weight.new_zeros(1, bsz, self.nhid),
-                weight.new_zeros(self.nlayers, bsz, self.nhid))
-
-# use Reco model v1--GRU model
-class RecoGRU_multitask_v11_3(nn.Module):
-    def __init__(self, ninp, dropout, seq_len, GPP_scaler, Ra_scaler, Yield_scaler,Res_scaler):
-        super(RecoGRU_multitask_v11_3, self).__init__()
-        nhid = 64
-        self.nhid = nhid
-        self.GPP_scaler = GPP_scaler
-        self.Ra_scaler = Ra_scaler
-        self.Yield_scaler = Yield_scaler
-        self.Res_scaler = Res_scaler
- #       self.GPP_Res_fmean = GPP_Res_fmean
-        self.seq_len = seq_len
-        self.gru_basic = nn.GRU(ninp,nhid,2,dropout=dropout, batch_first=True)
-        self.gru_Ra = nn.GRU(nhid+ninp, nhid,1,batch_first=True)
-        self.gru_Rh = nn.GRU(nhid+ninp+1, nhid,2,dropout=dropout, batch_first=True)#+1 means res ini 
-        self.gru_NEE = nn.GRU(ninp+2, nhid,1, batch_first=True)#+2 Ra and Rh
-        self.drop=nn.Dropout(dropout)
-        self.densor_Ra = nn.Linear(nhid, 1)
-        self.densor_Rh = nn.Linear(nhid, 1)
-        self.densor_NEE = nn.Linear(nhid, 1)
-        #attn for yield prediction
-        self.attn = nn.Sequential(
-            nn.Linear(nhid, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Linear(32, 1),
-            nn.Tanh()
-        )
-        self.densor_yield = nn.Sequential(
-            nn.Linear(nhid, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Linear(32, 1)
-        )
-        self.ReLU=nn.ReLU()
-        self.init_weights()
-
-    def init_weights(self):
-        initrange = 0.1 #may change to a small value
-        self.densor_Ra.bias.data.zero_()
-        self.densor_Ra.weight.data.uniform_(-initrange, initrange)
-        self.densor_Rh.bias.data.zero_()
-        self.densor_Rh.weight.data.uniform_(-initrange, initrange)
-        self.densor_NEE.bias.data.zero_()
-        self.densor_NEE.weight.data.uniform_(-initrange, initrange)
-        for ii in range(4):
-            self.attn[ii*2].bias.data.zero_()
-            self.attn[ii*2].weight.data.uniform_(-initrange, initrange)
-            self.densor_yield[ii*2].bias.data.zero_()
-            self.densor_yield[ii*2].weight.data.uniform_(-initrange, initrange)
-        
-
-    def forward(self, inputs, hidden):
-        output, hidden1 = self.gru_basic(inputs, hidden[0])
-        #predict yield
-        inputs2 = self.drop(output)
-        attn_weights = F.softmax(self.attn(inputs2), dim=1).view(inputs.size(0),1,inputs.size(1))
-        inputs2 = torch.bmm(attn_weights,inputs2)
-        output2 = self.densor_yield(inputs2)
-        
-        #predict flux
-        #Ra
-        output1 , hidden2 = self.gru_Ra(torch.cat((self.drop(output),inputs), 2), hidden[1])
-        Ra = self.densor_Ra(self.drop(output1))
-        
-        #Rh
-        #caculate annual Res
-        #Annual GPP+ Annual Ra - Yield, GPP is no.8 inputs
-        annual_GPP = torch.sum(Z_norm_reverse(inputs[:,:,8],self.GPP_scaler),dim=1).view(-1,1,1)
-        annual_Ra = torch.sum(Z_norm_reverse(Ra[:,:,0],self.Ra_scaler),dim=1).view(-1,1,1)
-        annual_Yield = Z_norm_reverse(output2[:,0,0],self.Yield_scaler).view(-1,1,1)
-        #control 0< Res_ini < GPP
-        Res_ini = self.ReLU(annual_GPP+annual_Ra - annual_Yield)
-        #Res_ini[Res_ini > annual_GPP].data = annual_GPP[Res_ini > annual_GPP].data 
-        #scale Res_ini
-        Res_ini = Z_norm_with_scaler(Res_ini,self.Res_scaler)
-        ##calculate Rh now with current year res
-        Res = Res_ini.repeat(1,self.seq_len,1)
-        #left day 300
-        Res[:,0:298,:] = 0.0
-        Res[:,300:,:] = 0.0
-        output1, hidden3  = self.gru_Rh(torch.cat((Res,self.drop(output),inputs), 2), hidden[2])
-        Rh = self.densor_Rh(self.drop(output1))
-        
-        #NEE
-        output1, hidden4 = self.gru_NEE(torch.cat((Ra,Rh,inputs), 2), hidden[3])
-        output1 = torch.cat((Ra,Rh,self.densor_NEE(self.drop(output1))),2)
-
-
-        
-        return output1, output2, (hidden1,hidden2,hidden3,hidden4)
-#bsz should be batch size
-    def init_hidden(self, bsz):
-        weight = next(self.parameters())
-        return (weight.new_zeros(2, bsz, self.nhid),
-                weight.new_zeros(1, bsz, self.nhid),
-                weight.new_zeros(2, bsz, self.nhid),
-                weight.new_zeros(1, bsz, self.nhid))
+def plot_features(data, feature_number, feature_name, sub_title):
+    n_features = feature_number 
     
-# Simplified model for yield
-class Yield_model_v12_1(nn.Module):
-    def __init__(self, ninp, dropout, seq_len):
-        super(Yield_model_v12_1, self).__init__()
-        nhid = 64
-        self.nhid = nhid
-        self.seq_len = seq_len
-        self.gru_basic = nn.GRU(ninp,nhid,2,dropout=dropout, batch_first=True)
-        self.drop=nn.Dropout(dropout)
-        #attn for yield prediction
-        self.attn = nn.Sequential(
-            nn.Linear(nhid, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Linear(32, 1),
-            nn.Tanh()
-        )
-        self.densor_yield = nn.Sequential(
-            nn.Linear(nhid, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Linear(32, 1)
-        )
-        self.ReLU=nn.ReLU()
-        self.init_weights()
-
-    def init_weights(self):
-        initrange = 0.1 #may change to a small value
-        for ii in range(4):
-            self.attn[ii*2].bias.data.zero_()
-            self.attn[ii*2].weight.data.uniform_(-initrange, initrange)
-            self.densor_yield[ii*2].bias.data.zero_()
-            self.densor_yield[ii*2].weight.data.uniform_(-initrange, initrange)
-        
-
-    def forward(self, inputs, hidden):
-        output, hidden1 = self.gru_basic(inputs, hidden)
-        #predict yield
-        inputs2 = self.drop(output)
-        attn_weights = F.softmax(self.attn(inputs2), dim=1).view(inputs.size(0),1,inputs.size(1))
-        inputs2 = torch.bmm(attn_weights,inputs2)
-        output2 = self.densor_yield(inputs2)
-
-        return output2, hidden1
-#bsz should be batch size
-    def init_hidden(self, bsz):
-        weight = next(self.parameters())
-        return weight.new_zeros(2, bsz, self.nhid)
+    n_cols = 4
+    n_rows = math.ceil(n_features / n_cols)
     
-# use Reco model v1--GRU model
-class RecoGRU_flux(nn.Module):
-    def __init__(self, ninp, nhid, nlayers, nout, dropout):
-        super(RecoGRU_flux, self).__init__()
-        if nlayers > 1:
-            self.gru = nn.GRU(ninp, nhid,nlayers,dropout=dropout, batch_first=True)
+    fig = plt.figure(figsize=(4 * n_cols, 3 * n_rows))
+    # plt.figure(figsize=(15, 10))
+    # plt.title('Scaled Input features')
+    # Loop through each feature and create a histogram subplot
+    for i in range(n_features):
+        plt.subplot(n_rows, n_cols, i+1)  # Adjust grid (3 rows, 4 columns) as needed
+        plt.hist(data[:, i], bins=30, edgecolor='black', alpha=0.7)
+        # plt.title(f'Feature {i+1}')
+        _f_name = feature_name[i] 
+        plt.title(_f_name)
+        # plt.xlabel(_f_name)
+        plt.ylabel('Frequency')
+    
+    # plt.tight_layout()
+    # Add a main title for all subplots
+    # Set a suptitle with a lower y value to bring it closer to subplots
+    # positions the overall title at 92% of the figure height (you can try lowering this value further if needed).
+    # plt.suptitle("Distribution of Scaled Features", fontsize=16, y=0.95)
+    plt.suptitle(sub_title, fontsize=16)
+    
+    # Adjust subplots: increase the 'top' value to reduce the gap between the title and subplots.
+    # plt.subplots_adjust(top=0.92, hspace=0.5)
+    
+    # Adjust the vertical space between rows (hspace)
+    # plt.subplots_adjust(hspace=0.4)  # Increase or decrease 0.5 as needed
+
+    # Reserve space at the top (e.g., 5% margin) so the suptitle doesn't overlap
+    plt.tight_layout(rect=[0, 0, 1, 0.93])
+    plt.show()
+
+
+def plot_result(y_scaler:list, features:list, all_predictions_flat:list,all_targets_flat:list, site:int, sub_title:str=None):
+
+    N, F = all_targets_flat.shape # N: 365, F: features number
+
+    fig, axes = plt.subplots(F, 1, figsize=(12, 4*F))
+
+    for i, name in enumerate(features):
+        ax_line = axes[i]
+
+        if y_scaler:
+            y_true = Z_norm_reverse(all_targets_flat[:,i], y_scaler[i])
+            y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i])
         else:
-            self.gru = nn.GRU(ninp, nhid,nlayers, batch_first=True)
-        #self.densor1 = nn.ReLU() #can test other function
-        self.densor2 = nn.Linear(nhid, nout)
-        self.nhid = nhid
-        self.nlayers = nlayers
-        self.drop=nn.Dropout(dropout)
-        self.init_weights()
+            y_true = all_targets_flat[:,i]
+            y_pred = all_predictions_flat[:,i]
 
-    def init_weights(self):
-        initrange = 0.1 #may change to a small value
-        self.densor2.bias.data.zero_()
-        self.densor2.weight.data.uniform_(-initrange, initrange)
+        if isinstance(y_true, torch.Tensor):
+            y_true = y_true.numpy()
+        if isinstance(y_pred, torch.Tensor):
+            y_pred = y_pred.numpy()
+        
+        # LINE PLOT: Days index vs. values
+        ax_line.plot(np.arange(N), y_true, 'o', label='True', color='steelblue', lw=1)
+        ax_line.plot(np.arange(N), y_pred, label='Pred', color='red',lw=1, alpha=0.7)
+        ax_line.set_title(f"{name} over Days")
+        ax_line.set_xlabel("Days Index")
+        ax_line.set_ylabel(name)
+        ax_line.legend(fontsize=8)
 
-    def forward(self, inputs, hidden):
-        output, hidden = self.gru(inputs, hidden)
-        #output = self.densor1(self.drop(output))
-        #output = torch.exp(self.densor2(self.drop(output))) # add exp
-        output = self.densor2(self.drop(output)) # add exp
-        return output, hidden
-#bsz should be batch size
-    def init_hidden(self, bsz):
-        weight = next(self.parameters())
-        return weight.new_zeros(self.nlayers, bsz, self.nhid)
-    
+    # Tighten up and show
+    if sub_title is None:
+        full_title = f"Sample {site}"
+    else:
+        full_title = f"{sub_title} Sample {site}"
+    fig.suptitle(full_title, fontsize=12)
+    fig.subplots_adjust(top=0.9, hspace=0.4)
+    plt.show()
 
-class RecoGRU_flux_v14(nn.Module):
-    def __init__(self, ninp, nhid, nlayers, nout, dropout):
-        super(RecoGRU_flux_v14, self).__init__()
-        if nlayers > 1:
-            self.gru = nn.GRU(ninp, nhid,nlayers,dropout=dropout, batch_first=True)
+def scatter_result(y_scaler:list, features:list, all_predictions_flat, all_targets_flat,sub_title:str=None):
+
+    N, F = all_targets_flat.shape # N: 365, F: features number
+
+    fig, axes = plt.subplots(F, 1, figsize=(12, 4*F))
+
+    for i, name in enumerate(features):
+        ax_scatter = axes[i]
+        if y_scaler:
+            y_true = Z_norm_reverse(all_targets_flat[:,i], y_scaler[i])
+            y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i])
         else:
-            self.gru = nn.GRU(ninp, nhid,nlayers, batch_first=True)
-        #self.densor1 = nn.ReLU() #can test other function
-        self.densor2 = nn.Linear(nhid, nout)
-        self.nhid = nhid
-        self.nlayers = nlayers
-        self.drop=nn.Dropout(dropout)
-        self.init_weights()
+            y_true = all_targets_flat[:,i]
+            y_pred = all_predictions_flat[:,i]
 
-    def init_weights(self):
-        initrange = 0.1 #may change to a small value
-        self.densor2.bias.data.zero_()
-        self.densor2.weight.data.uniform_(-initrange, initrange)
+        if isinstance(y_true, torch.Tensor):
+            y_true = y_true.numpy()
+        if isinstance(y_pred, torch.Tensor):
+            y_pred = y_pred.numpy()
 
-    def forward(self, inputs, hidden):
-        output, hidden = self.gru(inputs, hidden)
-        #output = self.densor1(self.drop(output))
-        #output = torch.exp(self.densor2(self.drop(output))) # add exp
-        output = self.densor2(self.drop(output)) # add exp
-        ##########get two output so that we don't need to change others
-        return output,output, hidden
-#bsz should be batch size
-    def init_hidden(self, bsz):
-        weight = next(self.parameters())
-        return weight.new_zeros(self.nlayers, bsz, self.nhid)
+        # SCATTER PLOT: true vs. pred
+        mn = min(y_true.min(), y_pred.min())
+        mx = max(y_true.max(), y_pred.max())
+
+        m, b, r_value, p_value, std_err = stats.linregress(y_true, y_pred) #r,p,std
+        ax_scatter.plot(y_pred, m*y_pred + b,color='red',lw=1.0)
+        ax_scatter.plot([mn, mx], [mn, mx],color='steelblue',linestyle='--')
+
+        # Compute metrics
+        r2   = r2_score(y_true, y_pred)
+        rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+        bias = np.mean(y_pred - y_true)
+
+        # Format text
+        stats_text = (
+            f"$R^2$ = {r2:.3f}\n"
+            f"RMSE = {rmse:.3f}\n"
+            f"Bias = {bias:.3f}"
+        )
+
+        # Place text in the upper left in axes-fraction coordinates
+        ax_scatter.text(
+            0.05, 0.95, stats_text,
+            transform= ax_scatter.transAxes,
+            fontsize=10,
+            verticalalignment='top',
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.7)
+        )
+
+        ax_scatter.scatter(y_true, y_pred, alpha=0.4, s=10)
+        # ax_scatter.plot([mn, mx], [mn, mx], 'k--', lw=1)
+        ax_scatter.set_title(f"{name}: True vs. Predicted")
+        ax_scatter.set_xlabel("True Value")
+        ax_scatter.set_ylabel("Predicted Value")
+        ax_scatter.set_xlim(mn, mx)
+        ax_scatter.set_ylim(mn, mx)
+
+    # Tighten up and show
+    if sub_title is None:
+        full_title = "True vs Prediction Values"
+    else:
+        full_title = f"{sub_title} True vs Prediction Values"
+    fig.suptitle(full_title, fontsize=12)
+    fig.subplots_adjust(top=0.9, hspace=0.4)
+    plt.show()
+
+# Scatter the prediction value and true values base on test dataset
+def vis_scatter_prediction_result(target, prediction, y_scaler:list, features:list):
+    y_param_num = target.shape[-1]
+    # self.all_predictions shape is [200, 365, features]
+
+    prediction_flat = prediction.reshape(-1,y_param_num)
+    target_flat     = target.reshape(-1,y_param_num)
+    scatter_result(y_scaler, features, prediction_flat, target_flat)
     
+
+def vis_plot_prediction_result_time_series(target, prediction, y_scaler:list, features:list, sample:int):
+    y_param_num = target.shape[-1]
+    # self.all_predictions shape is [200, 365, features]
+    _idx = sample
+    all_predictions_flat = prediction[_idx, :, :].reshape(-1, y_param_num)
+    all_targets_flat     = target[_idx, :, :].reshape(-1, y_param_num)
+    plot_result(y_scaler, features, all_predictions_flat, all_targets_flat, sample)
+
+
+def vis_plot_prediction_result_time_series_masked(target, prediction, y_scaler:list, features:list, sample:int, obs_mask:np.ndarray=None):
+    y_param_num = target.shape[-1]
+    # self.all_predictions shape is [200, 365, features]
+    _idx = sample
+    prediction_flat = prediction[_idx, :, :].reshape(-1,y_param_num)
+    target_flat     = target[_idx,:,:].reshape(-1,y_param_num)
+    mask = obs_mask.reshape(target.shape)[_idx,:,:].reshape(-1,y_param_num)
+    N, F = target_flat.shape # N: 365, F: features number
+
+    fig, axes = plt.subplots(F, 1, figsize=(12, 4*F))
+
+    for i, name in enumerate(features):
+        ax_line = axes[i]
+
+        y_true = Z_norm_reverse(target_flat[:,i], y_scaler[i]).numpy()
+        y_pred = Z_norm_reverse(prediction_flat[:,i], y_scaler[i]).numpy()
+        if mask is not None or mask.size != 0:
+            y_mask = mask.reshape(-1, mask.shape[-1])[:,i]
+            y_true = np.where(y_mask == 0, np.nan, y_true)
+        
+        # LINE PLOT: Days index vs. values
+        ax_line.plot(np.arange(N), y_true, 'o', label='True', color='steelblue', lw=1)
+        ax_line.plot(np.arange(N), y_pred, label='Pred', color='red',lw=1, alpha=0.7)
+        ax_line.set_title(f"{name} over Days")
+        ax_line.set_xlabel("Days Index")
+        ax_line.set_ylabel(name)
+        ax_line.legend(fontsize=8)
+
+    # Tighten up and show
+    sub_title = f"Sample {sample}"
+    fig.suptitle(sub_title, fontsize=12)
+    fig.subplots_adjust(top=0.9, hspace=0.4)
+    plt.show()
+
+
 ##########################################################################################
 #loss functions
 #
@@ -845,3 +738,642 @@ def sum_flux_mask_re(Reco_pred, NEE_pred, Reco_obs, NEE_obs,Y1_mask):
                 torch.mean(Y1_mask[bb].view(-1)*(NEE_pred[bb].view(-1) - NEE_obs[bb].view(-1))**2)
     loss = loss1/float(len(Reco_pred)) 
     return loss
+
+##########################################################################################
+#loss function customization
+#
+##########################################################################################
+import ast
+from collections import OrderedDict
+import re
+
+# Must define this function here, otherwise the namespace = globals() can't find this function
+
+def safe_repr(value):
+    """
+    Returns a string representation of 'value'.
+    - For basic Python types (int, float, str, list, tuple, set), uses repr() directly.
+    - For NumPy arrays, Pandas DataFrames, and Torch Tensors,
+      converts them to a Python list before using repr().
+    """
+    if isinstance(value, (int, float, str, list, tuple, set, dict, bool, type(None))):
+        return repr(value)
+    elif isinstance(value, np.ndarray):
+        return repr(value.tolist())
+    elif isinstance(value, pd.DataFrame):
+        # Convert DataFrame to a list of lists (rows) or dict of lists (columns)
+        # Choosing rows here for a common list-like representation
+        return repr(value.values.tolist())
+    elif isinstance(value, torch.Tensor):
+        return repr(value.tolist())
+    else:
+        # Fallback for other types
+        return repr(value)
+
+class LossFunctionCompiler:
+    def __init__(self, script_config):
+        self.script_config = script_config
+        self.validate_config()
+        self.analyze_dependencies()
+        self.generate_class_code()
+        
+    def validate_config(self):
+        """Validate configuration format"""
+        required_sections = ['parameters', 'variables', 'loss_fomula']
+        for section in required_sections:
+            if section not in self.script_config:
+                raise ValueError(f"Script config must contain '{section}' section")
+                
+        # Ensure the loss formula contains the final loss expression
+        if 'loss' not in self.script_config['loss_fomula']:
+            raise ValueError("Loss formula must contain a 'loss' expression")
+    
+    def extract_all_expressions(self):
+        """Extracts all expressions into a dictionary"""
+        expressions = {}
+        
+        # Add parameters
+        expressions.update(self.script_config['parameters'])
+        
+        # Add variable expressions
+        expressions.update(self.script_config['variables'])
+        
+        # Add loss formulas
+        expressions.update(self.script_config['loss_fomula'])
+        
+        return expressions
+    
+    def analyze_dependencies(self):
+        """Analyzes dependencies between expressions"""
+        # Extract all expressions
+        all_expressions = self.extract_all_expressions()
+        
+        self.dependencies = OrderedDict()
+        self.tensor_extractions = []
+        self.intermediate_exprs = []
+        
+        # Define list of known function names (these should not be considered variable dependencies)
+        self.known_functions = {'mean', 'abs', 'sum', 'exp', 'log', 'sqrt', 'min', 'max', 'Z_norm_reverse', 'relu'}
+        
+        # 1. Create dependency graph
+        for key, expr in all_expressions.items():
+            if not isinstance(expr, str):
+                continue
+                
+            try:
+                tree = ast.parse(expr, mode='eval')
+            except SyntaxError as e:
+                raise ValueError(f"Invalid expression for '{key}': {e}")
+                
+            variables = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Name) and node.id != 'self' and node.id not in self.known_functions:
+                    variables.add(node.id)
+            
+            self.dependencies[key] = variables
+        
+        # 2. Identify tensor extraction expressions (those that depend only on inputs or class attributes)
+        for key, deps in self.dependencies.items():
+            if key == 'loss':
+                continue  # Skip final loss
+                
+            # Check if it only depends on input tensors or configuration parameters
+            if all(dep in ['batch_x', 'y_pred', 'y_true'] or 
+                   (dep in all_expressions and not isinstance(all_expressions[dep], str))
+                   for dep in deps):
+                self.tensor_extractions.append(key)
+        
+        # 3. Identify intermediate expressions (dependent on other expressions)
+        self.intermediate_exprs = [key for key in self.dependencies.keys() 
+                                  if key != 'loss' and key not in self.tensor_extractions]
+        
+        # 4. Determine evaluation order for intermediate expressions
+        evaluated = set(self.tensor_extractions)
+        available_vars = set(self.tensor_extractions) | set(
+            k for k, v in all_expressions.items() if not isinstance(v, str)
+        )
+        
+        # Topological sort
+        evaluation_order = []
+        while self.intermediate_exprs:
+            added = False
+            remaining = []
+            
+            for key in self.intermediate_exprs:
+                deps = self.dependencies[key]
+                
+                # Check if all dependencies are available
+                if deps.issubset(available_vars):
+                    evaluation_order.append(key)
+                    available_vars.add(key)
+                    added = True
+                else:
+                    remaining.append(key)
+            
+            if not added and remaining:
+                # Find missing dependencies
+                missing_deps = {}
+                for key in remaining:
+                    deps = self.dependencies[key]
+                    missing = deps - available_vars
+                    if missing:
+                        missing_deps[key] = missing
+                
+                error_msg = "Circular dependency detected or missing variables:\n"
+                for key, missing in missing_deps.items():
+                    error_msg += f"  - '{key}' missing: {', '.join(missing)}\n"
+                raise RuntimeError(error_msg)
+            
+            self.intermediate_exprs = remaining
+        
+        self.evaluation_order = evaluation_order
+    
+    def replace_shortened_functions(self, expr):
+        """Replace abbreviated function names with their full torch-prefixed forms"""
+        replacements = {
+            r'\bmean\(': 'torch.mean(',
+            r'\babs\(': 'torch.abs(',
+            r'\bsum\(': 'torch.sum(',
+            r'\bexp\(': 'torch.exp(',
+            r'\blog\(': 'torch.log(',
+            r'\bsqrt\(': 'torch.sqrt(',
+            r'\bmin\(': 'torch.min(',
+            r'\bmax\(': 'torch.max(',
+            r'\brelu\(': 'torch.relu(',
+            # r'\bZ_norm_reverse\(': 'self.Z_norm_reverse(',
+        }
+        
+        for pattern, replacement in replacements.items():
+            expr = re.sub(pattern, replacement, expr)
+        
+        return expr
+    
+    def generate_class_code(self):
+        """Generate Python source code for the CarbonFluxLoss class"""
+        # Get parameter configuration
+        parameters = self.script_config['parameters']
+        all_expressions = self.extract_all_expressions()
+        
+        # Class header
+        class_code = [
+            "import torch",
+            "import torch.nn as nn",
+            "",
+            "class CarbonFluxLoss(nn.Module):",
+        ]
+        
+        # Generate __init__ method parameter list
+        init_params = []
+        for key, value in parameters.items():
+            # For scaler parameters, use default value None
+            # if key in ['GPP_scaler', 'y_scaler']:
+            #     init_params.append(f"{key}=None")
+            # else:
+            #     init_params.append(f"{key}={repr(value)}")
+
+            init_params.append(f"{key}={safe_repr(value)}")
+                
+        class_code.append(f"    def __init__(self, {', '.join(init_params)}):")
+        class_code.append("        super().__init__()")
+        
+        # Store all parameters as class attributes
+        for key in parameters.keys():
+            # For scalers, store them as tensors that do not require gradients
+            # if key in ['GPP_scaler', 'y_scaler']:
+            #     class_code.append(f"        self.{key} = torch.tensor({key}, requires_grad=False) if {key} is not None else None")
+            # else:
+            #     class_code.append(f"        self.{key} = {key}")
+
+            class_code.append(f"        self.{key} = {key}")
+        
+        # Add Z_norm_reverse method
+        # class_code.extend([
+        #     "",
+        #     "    def Z_norm_reverse(self, x, scaler):",
+        #     "        \"\"\"Z norm reverse\"\"\"",
+        #     "        if scaler is None:",
+        #     "            return x",
+        #     "        return x * scaler[1] + scaler[0]"
+        # ])
+        
+        # Process other non-parameter attributes (if any)
+        for key, value in all_expressions.items():
+            if key in parameters:  # Skip processed parameters
+                continue
+                
+            if not isinstance(value, str):
+                if isinstance(value, (int, float)):
+                    class_code.append(f"        self.{key} = {value}")
+                # If the parameter is a tensor, store it as a tensor that does not require gradients
+                elif torch.is_tensor(value):
+                    class_code.append(f"        self.{key} = torch.tensor({value.tolist()}, requires_grad=False)")
+                # Other types are stored directly
+                else:
+                    class_code.append(f"        self.{key} = {repr(value)}")
+        
+        # Forward method header
+        class_code.extend([
+            "",
+            "    def forward(self, y_pred, y_true, batch_x):"
+        ])
+        
+        # Copy parameters to local variables
+        param_names = list(parameters.keys())
+        if param_names:
+            class_code.append("        # Copy parameters to local variables")
+            for name in param_names:
+                class_code.append(f"        {name} = self.{name}")
+        
+        # Tensor extraction
+        if self.tensor_extractions:
+            class_code.append("\n        # Tensor extraction")
+            for key in self.tensor_extractions:
+                expr = all_expressions[key]
+                # Replace shorthand function names with full torch-prefixed forms
+                expr = self.replace_shortened_functions(expr)
+                class_code.append(f"        {key} = {expr}")
+        
+        # Intermediate calculations
+        if self.evaluation_order:
+            class_code.append("\n        # Intermediate calculations")
+            for key in self.evaluation_order:
+                expr = all_expressions[key]
+                # Replace shorthand function names with full torch-prefixed forms
+                expr = self.replace_shortened_functions(expr)
+                class_code.append(f"        {key} = {expr}")
+        
+        # Add loss
+        class_code.append("\n        # Loss")
+        loss_expr = self.replace_shortened_functions(all_expressions['loss'])
+        class_code.append(f"        loss = {loss_expr}")
+        class_code.append("        return loss")
+        
+        self.class_code = "\n".join(class_code)
+    
+    def compile_class(self):
+        """Compile and return the CarbonFluxLoss class"""
+        # namespace = {
+        #     'torch': torch,
+        #     'nn': nn,
+        #     '__name__': '__carbon_flux_loss__'
+        # }
+        namespace = globals()
+        
+        try:
+            exec(self.class_code, namespace)
+        except Exception as e:
+            print("Generated code:")
+            print(self.class_code)
+            raise RuntimeError(f"Failed to compile CarbonFluxLoss class: {e}")
+        
+        return namespace['CarbonFluxLoss']
+    
+    def generate_class(self):
+        return self.compile_class()
+
+
+
+##########################################################################################
+#model architecture design
+#
+##########################################################################################
+import re
+from time_series_models import TimeSeriesModel, Attention
+
+def extract_functions(expr: str) -> tuple[list[str], list[str]]:
+    """
+    Given an expression like 'fc(dropout(rh_out))' or 'attend & x',
+    return a list of function names and their direct arguments.
+    - For 'fc(dropout(rh_out))' returns ['fc', 'dropout'], ['rh_out']
+    - For 'nn.Linear(64,32)' returns ['nn.Linear'], ['64', '32']
+    - For 'attend & x' (no function) returns ['attend & x']
+    """
+    # 1) Find all function names (identifier followed by '(')
+    func_names = re.findall(r'\b(\w+(?:\.\w+)*)\s*\(', expr)
+
+    # 2) Capture the innermost parenthesis content (no nested '(' or ')')
+    inner_args = re.findall(r'\(\s*([^()]+?)\s*\)', expr)
+    # Filter out any that still contain parentheses
+    args = [arg for arg in inner_args if '(' not in arg and ')' not in arg]
+    # args will like ['64, 32']
+    parts = [p.strip() for p in args[0].split(',')] if args else []
+
+    # 3) If we found any functions, return them plus the direct args
+    if func_names:
+        return func_names, parts
+
+    # 4) Otherwise there’s no function call—return the raw expression
+    return [], [expr.strip()]
+
+
+class ModelStructureCompiler:
+    """
+    Compiles a PyTorch TimeSeriesModel subclass based on a configuration dict.
+
+    Config schema:
+      class_name: str
+      base_class: nn.Module subclass
+      init_params: dict of constructor parameters and their default values
+      layers: dict mapping attribute names to (factory_fn_name: str, *args)
+              where factory_fn_name can be 'gru', 'lstm', 'linear', 'dropout'
+      forward: dict mapping var names to Python expressions (strings)
+
+    Generates a class that:
+      - Inherits from base_class
+      - Defines __init__ with parameters and defaults
+      - Calls super().__init__(<init_param_names>)
+      - Instantiates layers with auto kwargs for recurrent layers
+      - Defines forward(self, x) based on forward config, translating '+' to torch.cat and layer calls to [0] captures
+    """
+    def __init__(self, config: dict):
+        self.cfg = config
+        self._validate()
+        # store layer keys for use in replacement
+        self.layer_names = list(self.cfg['layers'].keys())
+
+    def _validate(self):
+        required = ['class_name', 'base_class', 'init_params', 'layers', 'forward']
+        for key in required:
+            if key not in self.cfg:
+                raise ValueError(f"Missing config key: {key}")
+        if not isinstance(self.cfg['init_params'], dict):
+            raise ValueError("'init_params' must be a dict of name->default values")
+        if not isinstance(self.cfg['layers'], dict) or not isinstance(self.cfg['forward'], dict):
+            raise ValueError("'layers' and 'forward' must be dicts")
+
+    def replace_shortened_functions(self, expr: str) -> str:
+        """
+        Replace shorthand layer calls with self-prefixed calls
+        based on configured layer names.
+        """
+        for name in self.layer_names:
+            # replace e.g. 'fc(' with 'self.fc('
+            expr = re.sub(rf"\b{name}\(", f"self.{name}(", expr)
+        return expr
+
+    def check_configuration(self):
+        init_params = self.cfg['init_params']
+        layers_cfg = self.cfg['layers']
+        forward_cfg = self.cfg['forward']
+        
+        # Instantiate layers
+        layers_dict = {}
+        layers_name = list()
+        fn_list = list() # record all functions in layers
+        layers_keys = list(layers_cfg.keys())
+        for attr, spec in layers_cfg.items():
+            fn = spec[0].strip().lower()
+            fn_list.append(fn)
+            layers_name.append(attr.strip())
+
+            args = spec[1:]
+            if fn in ('gru', 'lstm'):
+                inp, hid, *rest = args
+                cls = 'nn.GRU' if fn == 'gru' else 'nn.LSTM'
+                outp = hid
+                layers_dict[attr] = [cls, inp, outp]
+            elif fn == 'linear':
+                inp, outp = args
+                layers_dict[attr] = ['nn.Linear', inp, outp]
+            elif fn == 'dropout':
+                p, = args
+                layers_dict[attr] = ['nn.Dropout', 0, 0]
+            elif fn == 'attention':
+                p, outp = args
+                layers_dict[attr] = ['Attention', p, outp]
+            # Activation: ReLU
+            elif fn == 'relu':
+                layers_dict[attr] = ['nn.ReLU', 0, 0]
+            # Activation: Tanh
+            elif fn == 'tanh':
+                layers_dict[attr] = ['nn.Tanh', 0, 0]
+            elif fn == 'softmax' or fn == 'F.softmax':
+                layers_dict[attr] = ['F.softmax', 0, 0]
+            # Sequential container
+            elif fn in ('sequential', 'nn.sequential'):
+                for func_call in args:
+                    fn,params = extract_functions(func_call)
+                    if fn == ['nn.Linear']:
+                        inp, outp = params
+                layers_dict[attr] = ['nn.Sequential', 0, outp] # get last nn.Linear()
+            else:
+                inp, outp = args
+                layers_dict[attr] = [fn, inp, outp]
+
+        fn_set = set(fn_list) #remove duplicate items
+
+        # Forward process
+        concat_symbol = '&'
+        mm_symbol = '@'
+        dot_symbol = '.'
+
+        return_p_list = ['x']
+        output_p_dict = dict()
+        init_params_keys = list(init_params.keys())
+        output_p_dict['x'] = init_params_keys[0] # Get first key
+
+        for var, expr in forward_cfg.items():
+            # get return parameters
+            return_p = [part.strip() for part in var.split(',')]
+            return_p_list += return_p
+
+            if concat_symbol in expr and 'torch.' not in expr and '(' not in expr:
+                parts = [p.strip() for p in expr.split(concat_symbol)]
+                # each part should exist in previous
+                for part in parts:
+                    if part not in return_p_list:
+                        print(f"Warning check {part} in the {expr}")
+
+                total_dim = []
+                for part in parts:
+                    _dim = output_p_dict[part]
+                    total_dim.append(_dim)
+
+                full_dim = '+'.join(total_dim)
+                for p in return_p:
+                    output_p_dict[p] = full_dim
+
+            elif mm_symbol in expr :
+                parts = [p.strip() for p in expr.split(mm_symbol)]
+                # Get last matrix's dimension
+                last_part = parts[-1]
+                for p in return_p:
+                    if last_part in return_p_list:
+                        output_p_dict[p] = output_p_dict[last_part]
+                    else:
+                        output_p_dict[p] = -1 # means unknow dimension
+
+            elif dot_symbol in expr: # exist like 0.5 F.softmax(), torch.sqrt(), nn.zeros()
+                skip_line = False
+                fns,params = extract_functions(expr) # get [fns], [params]
+                if len(fns) == 0: # no function exist
+                    skip_line = True
+                else:
+                    for fn in fns:
+                        if dot_symbol in fn:
+                            skip_line = True
+                
+                # do nothing, skip this line
+                if skip_line:
+                    continue
+
+            else:
+                # extract func names and parameters
+                fns,params = extract_functions(expr) # get [fns], [params]
+                fns.reverse() # change func order for case: ['fc', 'dropout'], change to ['dropout', 'fc']
+                if len(fns) == 0: # no function in configuration the the fns is a empty list
+                    output_p_dict[var] = expr
+                    continue
+
+                # Input parameter should exist in before rows
+                for param in params: # Only support one param now
+                    if param not in return_p_list: # The param should be pre lines output
+                        print(f"Warning check {param} in the {expr}")
+                
+                # the function name should exist in layers
+                for fn in fns: 
+                    if fn not in layers_keys:
+                        print(f"Invalid function name {fn} in the {expr}")
+
+                # get each func call returned dimension
+                for fn in fns:
+                    input_dim, output_dim = layers_dict[fn][1:]
+                    if output_dim == 0: 
+                        # don't change dimension, need get original dim from input_dim
+                        output_dim = output_p_dict[params[0]]
+
+                    for p in return_p:
+                        output_p_dict[p] = output_dim
+
+                for param in params:
+                    if param == 'x':
+                        continue
+
+                    if input_dim == 0:
+                        continue
+
+                    try:
+                        input_para_dim_value = eval(output_p_dict[param], {}, init_params)
+                        layer_required_dim = eval(input_dim, {}, init_params)
+                    except NameError as e:
+                        print(f"Caught a ValueError: {e}")
+                        print(f"Warning: check {param} in {expr}")
+
+                    if input_para_dim_value != layer_required_dim:
+                        print(f"Warning: check {param} in {expr}. The dim of {param} is {input_para_dim_value}, but layer {fn} requires a input_dim of {layer_required_dim}")
+
+
+    def generate_model(self):
+        class_name = self.cfg['class_name']
+        base = self.cfg['base_class']
+        init_params = self.cfg['init_params']
+        layers_cfg = self.cfg['layers']
+        forward_cfg = self.cfg['forward']
+
+        lines = []
+        # Class header
+        lines.append(f"class {class_name}({base}):")
+        # __init__ signature
+        params_sig = ', '.join(f"{k}={repr(v)}" for k, v in init_params.items())
+        lines.append(f"    def __init__(self, {params_sig}):")
+        # super init
+        if base == 'TimeSeriesModel':
+            names = ', '.join(init_params.keys())
+            lines.append(f"        super().__init__({names})")
+        else:
+            lines.append(f"        super().__init__()")
+        lines.append("")
+
+        # Save input parameters
+        for key in init_params.keys():
+            lines.append(f"        self.{key} = {key}")
+        lines.append("")
+
+        # Instantiate layers
+        for attr, spec in layers_cfg.items():
+            fn = spec[0].lower()
+            args = spec[1:]
+            if fn in ('gru', 'lstm'):
+                inp, hid, nl, dp, *rest = args
+                cls = 'nn.GRU' if fn == 'gru' else 'nn.LSTM'
+                lines.append(
+                    f"        self.{attr} = {cls}("
+                    f"{inp}, {hid}, {nl}, bias=True, batch_first=True, dropout={dp})"
+                )
+            elif fn == 'linear':
+                inp, outp = args
+                lines.append(f"        self.{attr} = nn.Linear({inp}, {outp})")
+            elif fn == 'dropout':
+                p, = args
+                lines.append(f"        self.{attr} = nn.Dropout({p})")
+            elif fn == 'attention':
+                p, outp = args
+                lines.append(f"        self.{attr} = Attention({p})")
+            # Activation: ReLU
+            elif fn == 'relu':
+                lines.append(f"        self.{attr} = nn.ReLU()")
+            # Activation: Tanh
+            elif fn == 'tanh':
+                lines.append(f"        self.{attr} = nn.Tanh()")
+            # Sequential container
+            elif fn in ('sequential', 'nn.sequential'):
+                # args are module definition strings
+                lines.append(f"        self.{attr} = nn.Sequential(")
+                for module_str in args:
+                    lines.append(f"            {module_str},")
+                # remove trailing comma from last
+                lines[-1] = lines[-1].rstrip(',')
+                lines.append(f"        )")
+            else:
+                args_list = ', '.join(map(str, args[:-1])) # the last is the output dimmension
+                lines.append(f"        self.{attr} = {fn}({args_list})")
+
+        # forward method
+        lines.append("")
+        lines.append("    def forward(self, x: torch.Tensor):")
+        # Translate forward config to code lines
+
+        # copy parameters to local var
+        lines.append("        # Copy parameter to local")
+        for key in init_params.keys():
+            lines.append(f"        {key} = self.{key}")
+        lines.append("")
+
+        concat_symbol = '&'
+        mm_symbol = '@'
+        for var, expr in forward_cfg.items():
+            # handle concatenation
+            if concat_symbol in expr and 'torch.' not in expr and '(' not in expr:
+                parts = [p.strip() for p in expr.split(concat_symbol)]
+                concat = ', '.join(parts)
+                code = f"        {var} = torch.cat([{concat}], dim=-1)"
+            # handle layer calls e.g. 'fc(x), dropout(x), fc(dropout(x))'
+            elif mm_symbol in expr :
+                parts = [p.strip() for p in expr.split(mm_symbol)]
+                matrix_multiple = ', '.join(parts)
+                code = f"        {var} = torch.bmm({matrix_multiple})"
+            else:
+                # apply shorthand replacement
+                expr = self.replace_shortened_functions(expr)
+                code = f"        {var} = {expr}"
+            lines.append(code)
+        lines.append("        return output")
+
+        # Execute dynamic code\        
+        code_str = '\n'.join(lines)
+        self.class_code = code_str
+        # exec_globals = {
+        #     're': re,
+        #     'torch': torch,
+        #     'nn': nn,
+        #     'F': F,
+        #     base.__name__: base,
+        #     'Attention': Attention
+        # }
+        # namespace = {}
+        # exec(code_str, exec_globals, namespace)
+
+        namespace = globals()
+        exec(code_str, namespace)
+        return namespace[class_name]
+

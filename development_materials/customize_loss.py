@@ -75,7 +75,7 @@ class CarbonFluxLossCompiler:
         self.intermediate_exprs = []
         
         # Define list of known function names (these should not be considered variable dependencies)
-        self.known_functions = {'mean', 'abs', 'sum', 'exp', 'log', 'sqrt', 'min', 'max', 'Z_norm_reverse'}
+        self.known_functions = {'mean', 'abs', 'sum', 'exp', 'log', 'sqrt', 'min', 'max', 'Z_norm_reverse', 'relu'}
         
         # 1. Create dependency graph
         for key, expr in all_expressions.items():
@@ -161,6 +161,7 @@ class CarbonFluxLossCompiler:
             r'\bsqrt\(': 'torch.sqrt(',
             r'\bmin\(': 'torch.min(',
             r'\bmax\(': 'torch.max(',
+            r'\brelu\(': 'torch.relu(',
             # r'\bZ_norm_reverse\(': 'self.Z_norm_reverse(',
         }
         
