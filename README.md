@@ -13,7 +13,7 @@ It includes four files:
   - **n2o_pretrain_data.sav**: the synthetic dataset of KGMLag-N2O.
   - **n2o_finetune_augment_data.sav**: the augmented observation dataset of KGMLag-N2O.
 
-Each file is a serialized Python dictionary containing the following keys and values:
+Each file is a serialized Python dictionary containing the following keys and values, except that co2_finetune_data has no y_scaler because its Y_train and Y_test are not standardized:
 
       data={'X_train': X_train,
             'X_test': X_test,
@@ -26,17 +26,15 @@ Each file is a serialized Python dictionary containing the following keys and va
 
 ### Files 
 
-  • **unified_model_processing.ipynb** is a jupyter notebook to demonstrate the use of PyKGML. 
+  • **Tutorial_CO2_Colab.ipynb** is a Jupyter Notebook tutorial that runs on Google Colab. This is recommended for new users who are unfamiliar with Python or do not have Jupyter installed locally.    
+
+  • **Tutorial_CO2_local.ipynb** is a Jupyter Notebook tutorial for local demonstration and requires a Python environment with Jupyter installed. 
 
   • **time_series_models.py** defines model classes and the processes for data preparation, model training and testing. 
 
   • **dataset.py** is used to prepare the example datasets: 'CO2_synthetic_dataset' generates the CO2 pretraining dataset and 'CO2_fluxtower_dataset' generates the CO2 fine-tuning dataset. 'N2O_synthetic_dataset' and 'N2O_mesocosm_dataset' prepare the N2O pretraining dataset and the N2O fine-tuning dataset, respectively. 
   
   • **kgml_lib.py** defines utility functions such as normalization (Z_norm) and  coefficient of determination computation (R2Loss).
-  
-  • **customize_loss.py** defines a compiler for customizing loss functions. Users can design a loss function through a intuitive script. Example can be found in **unified_model_processing.ipynb**.
-
-  • **customize_module.py** defines a compiler for customizing model structures. Users can design a model structure through a intuitive script. Example can be found in **unified_model_processing.ipynb**.
 
   The development materials of PyKGML including original code of KGMLag-CO2 and KGMLag-N2O are stored in the folder [development_materials](development_materials).
 
@@ -45,9 +43,9 @@ Each file is a serialized Python dictionary containing the following keys and va
 
 **Environment**  
 We use Jupyter Notebook ([try it online or install locally](https://docs.jupyter.org/en/stable/start/)) for Python to example PyKGML usage on both cloud and local environments:  
-  1. **Google Colab** (recommended for new users): is a hosted Jupyter Notebook service that requires no setup to use and provides free access to computing resources including GPUs. To get started with Google Colab, please refer to [Colab's official tutorial](https://colab.research.google.com/). The Colab notebook on PyKGML demonstration is [Tutorial_co2_colab.ipynb](Tutorial_co2_colab.ipynb).
+  1. **Google Colab** (recommended for new users): is a hosted Jupyter Notebook service that requires no setup to use and provides free access to computing resources including GPUs. To get started with Google Colab, please refer to [Colab's official tutorial](https://colab.research.google.com/). The Colab notebook on PyKGML demonstration is [Tutorial_CO2_Colab.ipynb](Tutorial_co2_colab.ipynb).
 
-  2. **Local**: The notebook on local PyKGML demonstration is [Tutorial_co2_local.ipynb](Tutorial_co2_local.ipynb). To use this notebook, The following applications and packages are required:  
+  2. **Local**: The notebook on local PyKGML demonstration is [Tutorial_CO2_local.ipynb](Tutorial_co2_local.ipynb). To use this notebook, The following applications and packages are required:  
       - Python 3 ([download](https://www.python.org/downloads/))  
       - Jyputer Notebook ([installation](https://docs.jupyter.org/en/stable/install/notebook-classic.html)).  
       - Python packages ([installation guidance](https://packaging.python.org/en/latest/tutorials/installing-packages/)):  
