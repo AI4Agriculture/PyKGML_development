@@ -779,13 +779,13 @@ class LossFunctionCompiler:
         
     def validate_config(self):
         """Validate configuration format"""
-        required_sections = ['parameters', 'variables', 'loss_fomula']
+        required_sections = ['parameters', 'variables', 'loss_formula']
         for section in required_sections:
             if section not in self.script_config:
                 raise ValueError(f"Script config must contain '{section}' section")
                 
         # Ensure the loss formula contains the final loss expression
-        if 'loss' not in self.script_config['loss_fomula']:
+        if 'loss' not in self.script_config['loss_formula']:
             raise ValueError("Loss formula must contain a 'loss' expression")
     
     def extract_all_expressions(self):
@@ -799,7 +799,7 @@ class LossFunctionCompiler:
         expressions.update(self.script_config['variables'])
         
         # Add loss formulas
-        expressions.update(self.script_config['loss_fomula'])
+        expressions.update(self.script_config['loss_formula'])
         
         return expressions
     
