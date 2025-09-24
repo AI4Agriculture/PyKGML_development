@@ -1,4 +1,4 @@
-from typing import Tuple
+
 import numpy as np
 import pandas as pd
 import torch
@@ -8,11 +8,13 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import Dataset, DataLoader
 # from sequence_dataset import SequenceDataset, train_test_split
-
+# from typing import Tuple
 import matplotlib.pyplot as plt
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 import scipy.stats as stats
+
+import inspect
 
 def Z_norm_reverse(X,Xscaler,units_convert=1.0):
     return (X*Xscaler[1]+Xscaler[0])*units_convert
@@ -20,7 +22,7 @@ def Z_norm_reverse(X,Xscaler,units_convert=1.0):
 def Z_norm_with_scaler(X,Xscaler):
     return (X-Xscaler[0])/Xscaler[1]
 
-def plot_result(y_scaler:list, features:list, all_predictions_flat:list,all_targets_flat:list, site:int, year:int, sub_title:str=None):
+def plot_result(y_scaler:list, features:list, all_predictions_flat:list,all_targets_flat:list, sample:int, sub_title:str=None):
 
     N, F = all_targets_flat.shape # N: 365, F: features number
 
@@ -29,10 +31,15 @@ def plot_result(y_scaler:list, features:list, all_predictions_flat:list,all_targ
     for i, name in enumerate(features):
         ax_line = axes[i]
 
-        y_true = Z_norm_reverse(all_targets_flat[:,i], y_scaler[i])
+        if y_scaler is not None and len(y_scaler) > 0:
+            y_true = Z_norm_reverse(all_targets_flat[:,i], y_scaler[i])
+            y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i])
+        else:
+            y_true = all_targets_flat[:,i]
+            y_pred = all_predictions_flat[:,i]
+
         if isinstance(y_true, torch.Tensor):
             y_true = y_true.numpy()
-        y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i])
         if isinstance(y_pred, torch.Tensor):
             y_pred = y_pred.numpy()
         
@@ -46,14 +53,14 @@ def plot_result(y_scaler:list, features:list, all_predictions_flat:list,all_targ
 
     # Tighten up and show
     if sub_title is None:
-        full_title = f"Site {site} Year {year}"
+        full_title = f"Sample {sample}"
     else:
-        full_title = f"{sub_title} Site {site} Year {year}"
+        full_title = f"{sub_title} Sample {sample}"
     fig.suptitle(full_title, fontsize=12)
     fig.subplots_adjust(top=0.9, hspace=0.4)
     plt.show()
 
-def scatter_result(y_scaler:list, features:list, all_predictions_flat, all_targets_flat,sub_title:str=None):
+def scatter_result(y_scaler:list, features:list, all_predictions_flat, all_targets_flat, sub_title:str=None):
 
     N, F = all_targets_flat.shape # N: 365, F: features number
 
@@ -62,10 +69,15 @@ def scatter_result(y_scaler:list, features:list, all_predictions_flat, all_targe
     for i, name in enumerate(features):
         ax_scatter = axes[i]
 
-        y_true = Z_norm_reverse(all_targets_flat[:,i], y_scaler[i])
+        if y_scaler is not None and len(y_scaler) > 0:
+            y_true = Z_norm_reverse(all_targets_flat[:,i], y_scaler[i])
+            y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i])
+        else:
+            y_true = all_targets_flat[:,i]
+            y_pred = all_predictions_flat[:,i]
+
         if isinstance(y_true, torch.Tensor):
             y_true = y_true.numpy()
-        y_pred = Z_norm_reverse(all_predictions_flat[:,i], y_scaler[i])
         if isinstance(y_pred, torch.Tensor):
             y_pred = y_pred.numpy()
 
@@ -318,21 +330,18 @@ class TimeSeriesModel(nn.Module):
 
         # return train_loader, test_loader
 
-    def load_pretrained(self, model, pretrained_model_path=None):
-        #output 4 in first module and 1 in second module
-        checkpoint = torch.load(pretrained_model_path, weights_only=False, map_location=torch.device('mps'))
-        model.load_state_dict(checkpoint['model_state_dict'])
+    def load_pretrained(self, pretrained_model_path=None):
+        checkpoint = torch.load(pretrained_model_path, weights_only=True)
+        self.load_state_dict(checkpoint)
         
-        print(self.model)
-        params = list(self.model.parameters())
-        print(len(params))
-        print(params[5].size())  # conv1's .weight
+        print(self)
+        params = list(self.parameters())
         print("Model's state_dict:")
-        for param_tensor in self.model.state_dict():
-            print(param_tensor, "\t", self.model.state_dict()[param_tensor].size())
+        for param_tensor in self.state_dict():
+            print(param_tensor, "\t", self.state_dict()[param_tensor].size())
 
 
-    def train_model(self, loss_fun, LR=0.001,step_size=20, gamma=0.8, maxepoch=80, use_y_mask = False):
+    def train_model(self, loss_func, LR=0.001,step_size=20, gamma=0.8, maxepoch=80, use_y_mask = False, checkpoint_path='best_model.pth'):
         # Initial parameters
         self.train_losses = []
         self.val_losses = []
@@ -341,7 +350,17 @@ class TimeSeriesModel(nn.Module):
         y_num = self.output_dim  # output features number
 
         self.to(self.device)
-        self.criterion = loss_fun # nn.L1Loss() # nn.MSELoss() # For regression
+        self.criterion = loss_func # nn.L1Loss() # nn.MSELoss() # For regression
+        # check if customized loss function
+        sig = inspect.signature(loss_func.forward)
+        num_params = len(sig.parameters)
+        if num_params == 3: # customized loss function
+            self.b_customized_loss = True
+        elif num_params == 2:  # pytorch loss function, like nn.MSELoss
+            self.b_customized_loss = False
+        else:
+            raise ValueError("The loss function error.")
+
         optimizer = optim.Adam(self.parameters(), lr=LR)
 
         num_epochs = maxepoch  # Adjust as needed
@@ -352,7 +371,7 @@ class TimeSeriesModel(nn.Module):
         best_loss = float('inf')
         epochs_no_improve = 0
         patience = 20
-        checkpoint_path='best_GRU_model.pth'
+        # checkpoint_path='best_model.pth'
 
         # StepLR scheduler 
         scheduler = StepLR(optimizer, step_size=step_size, gamma=gamma)
@@ -372,9 +391,14 @@ class TimeSeriesModel(nn.Module):
                     y_mask = batch_y[..., y_num:]
                     y_true = batch_y[..., :y_num] * y_mask
                     y_pred = outputs_pred * y_mask
-                    loss = self.criterion(y_pred, y_true)
                 else:
-                    loss = self.criterion(outputs_pred, batch_y)
+                    y_true = batch_y
+                    y_pred = outputs_pred
+
+                if self.b_customized_loss == True:
+                    loss = self.criterion(y_pred, y_true, batch_x)
+                else:
+                    loss = self.criterion(y_pred, y_true)
 
                 loss.backward()
                 # Gradient clipping
@@ -397,10 +421,15 @@ class TimeSeriesModel(nn.Module):
                         y_mask = batch_y[..., y_num:]
                         y_true = batch_y[..., :y_num] * y_mask
                         y_pred = outputs_pred * y_mask
-                        loss = self.criterion(y_pred, y_true)
                     else:
-                        loss = self.criterion(outputs_pred, batch_y)
+                        y_true = batch_y
+                        y_pred = outputs_pred
                     
+                    if self.b_customized_loss == True:
+                        loss = self.criterion(y_pred, y_true, batch_x)
+                    else:
+                        loss = self.criterion(y_pred, y_true)
+
                     test_losses.append(loss.item())
             
             avg_test_loss = np.mean(test_losses)
@@ -451,10 +480,13 @@ class TimeSeriesModel(nn.Module):
                     y_true = batch_y[..., :y_num] * y_mask
                     y_pred = outputs_pred * y_mask
                 else:
-                    y_true = outputs_pred
-                    y_pred = batch_y
+                    y_true = batch_y
+                    y_pred = outputs_pred
                 
-                loss = self.criterion(y_pred, y_true)
+                if self.b_customized_loss == True:
+                    loss = self.criterion(y_pred, y_true, batch_x)
+                else:
+                    loss = self.criterion(y_pred, y_true)
                 test_losses.append(loss.item())
                 
                 # Save predictions and targets for further analysis
@@ -491,19 +523,19 @@ class TimeSeriesModel(nn.Module):
 
     # Select one site, one year in the test dataset
     # To plot curves for comparing the prediction and true values
-    def Vis_plot_prediction_result_time_series(self, y_scaler:list, features:list, site:int,year:int):
+    def vis_plot_prediction_result_time_series(self, y_scaler:list, features:list, sample:int):
         y_param_num = self.all_targets.shape[-1]
         # self.all_predictions shape is [200, 365, features]
-        _idx = site*2 + year
+        _idx = sample
         all_predictions_flat = self.all_predictions[_idx, :, :].reshape(-1,y_param_num)
         all_targets_flat     = self.all_targets[_idx,:,:].reshape(-1,y_param_num)
-        plot_result(y_scaler, features, all_predictions_flat, all_targets_flat, site, year)
+        plot_result(y_scaler, features, all_predictions_flat, all_targets_flat, sample)
         
 
-    def Vis_plot_prediction_result_time_series_masked(self, y_scaler:list, features:list, site:int,year:int, obs_mask:np.ndarray=None):
+    def vis_plot_prediction_result_time_series_masked(self, y_scaler:list, features:list, sample:int, obs_mask:np.ndarray=None):
         y_param_num = self.all_targets.shape[-1]
         # self.all_predictions shape is [200, 365, features]
-        _idx = site*2 + year
+        _idx = sample
         predictions_flat = self.all_predictions[_idx, :, :].reshape(-1,y_param_num)
         targets_flat     = self.all_targets[_idx,:,:].reshape(-1,y_param_num)
         mask = obs_mask.reshape(self.all_targets.shape)[_idx,:,:].reshape(-1,y_param_num)
@@ -529,14 +561,14 @@ class TimeSeriesModel(nn.Module):
             ax_line.legend(fontsize=8)
 
         # Tighten up and show
-        sub_title = f"Site {site} Year {year}"
+        sub_title = f"Sample {sample}"
         fig.suptitle(sub_title, fontsize=12)
         fig.subplots_adjust(top=0.9, hspace=0.4)
         plt.show()
             
 
     # Scatter the prediction value and true values base on test dataset
-    def Vis_scatter_prediction_result(self, y_scaler:list, features:list):
+    def vis_scatter_prediction_result(self, y_scaler:list, features:list):
         y_param_num = self.all_targets.shape[-1]
         # self.all_predictions shape is [200, 365, features]
 
