@@ -43,7 +43,7 @@ Each file is a serialized Python dictionary containing the following keys and va
 
 **Environment**  
 We use Jupyter Notebook ([try it online or install locally](https://docs.jupyter.org/en/stable/start/)) for Python to example PyKGML usage on both cloud and local environments:  
-  1. **Google Colab** (recommended for new users): is a hosted Jupyter Notebook service that requires no setup to use and provides free access to computing resources including GPUs. To get started with Google Colab, please refer to [Colab's official tutorial](https://colab.research.google.com/). The Colab notebook on PyKGML demonstration is [Tutorial_CO2_Colab.ipynb](Tutorial_CO2_Colab.ipynb).
+  1. **Google Colab** (recommended for new users): is a hosted Jupyter Notebook service that requires no setup to use and provides free access to computing resources including GPUs. To get started with Google Colab, please refer to [Colab's official tutorial](https://colab.research.google.com/). The Colab notebook on PyKGML demonstration is [Tutorial_CO2_Colab.ipynb](Tutorial_CO2_Colab.ipynb). ***Note: Remember to change the runtime type to include a "GPU" resource before running the code!
 
   2. **Local** (or other cloud computing platform): The notebook on local PyKGML demonstration is [Tutorial_CO2_local.ipynb](Tutorial_CO2_local.ipynb). To use this notebook, The following applications and packages are required:  
       - Python 3 ([download](https://www.python.org/downloads/))  
