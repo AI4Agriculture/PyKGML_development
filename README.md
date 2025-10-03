@@ -150,7 +150,7 @@ We use Jupyter Notebook ([try it online or install locally](https://docs.jupyter
     # Create the model
     myKGML = Compiler.generate_model()
 
-Details and example can be found in [unified_model_processing.ipynb](unified_model_processing.ipynb).
+Details and example can be found in the tutorial, [Tutorial_CO2_Colab.ipynb](Tutorial_CO2_Colab.ipynb) or [Tutorial_CO2_local.ipynb](Tutorial_CO2_local.ipynb).
 
 
 # Benchmark dataset
@@ -201,7 +201,7 @@ Two datasets were harmonized using the CO<sub>2</sub> flux dataset from study 2 
     - Soil properties (6): bulk density (TBKDS), sand content (TSAND), silt content (TSILT), pH (TPH), cation exchange capacity (TCEC), soil organic carbon concetration (TSOC)
     - Management (3): N-fertilizer rate (FERTZR_N), planting day of year (PDOY), crop type (PLANTT).
 
-    Output variables (3):
+    Output variables (5):
     - N<sub>2</sub>O fluxes (N2O_FLUX), soil CO<sub>2</sub> fluxes (CO2_FLUX), soil water content at 10 cm (WTR_3), soil ammonium concentration at 10 cm (NH4_3), soil nitrate concentration at 10 cm (NO3_3).
 
   * n2o_finetune_augment_data:
@@ -211,12 +211,10 @@ Two datasets were harmonized using the CO<sub>2</sub> flux dataset from study 2 
     - Data split: 5 chambers as the training data, and the other one as the testing data.
 
     Input variables (16):  
-    - Meterological (7): solar radiation (RADN), max air T (TMAX_AIR), min air T (TMIN_AIR), max air humidity (HMAX_AIR), min air humidity (HMIN_AIR), wind speed (WIND), precipitation (PRECN).
-    - Soil properties (6): bulk density (TBKDS), sand content (TSAND), silt content (TSILT), pH (TPH), cation exchange capacity (TCEC), soil organic carbon concetration (TSOC)
-    - Management (3): N-fertilizer rate (FERTZR_N), planting day of year (PDOY), crop type (PLANTT).
+    - The same as n2o_pretrain_data. 
 
-    Output variables (3):
-    - N2O fluxes (N2O_FLUX), soil CO2 fluxes (CO2_FLUX), soil water content at 10 cm (WTR_3), soil ammonium concentration at 10 cm (NH4_3), soil nitrate concentration at 10 cm (NO3_3).
+    Output variables (5):
+    - N<sub>2</sub>O fluxes (N2O_FLUX), soil CO<sub>2</sub> fluxes (CO2_FLUX), soil water content at 10 cm (WTR_3), soil ammonium concentration at 10 cm (NH4_3), soil nitrate concentration at 10 cm (NO3_3).
 
 # PyKGML development
 In PyKGML, we functionize several strategies for incoporating domain knowledge into the development of a KGML model a user-friendly way. Those strategies were explored and summarized in the two references ([Liu et al. 2022](https://doi.org/10.5194/gmd-15-2839-2022), [2024](https://www.nature.com/articles/s41467-023-43860-5)):
@@ -225,7 +223,7 @@ In PyKGML, we functionize several strategies for incoporating domain knowledge i
 3. Hierarchical architecture design according to causal relationships.
 
 
-PyKGML have realized loss function customization and model architecture design in a way to convert user's idea from an intuitive configuration script to a function or model using the loss function compiler or architecture compiler. Refer to [unified_model_processing.ipynb](unified_model_processing_v2.ipynb) for using examples. 
+PyKGML have realized loss function customization and model architecture design in a way to convert user's idea from an intuitive configuration script to a function or model using the loss function compiler or architecture compiler.  
 
 Models of KGMLag-CO2 and KGMLag-N2O were added to the model gallery of PyKGML so users can adopt these previously tested architectures for training or fine-tuning. Please note that the KGMLag-CO2 and KGMLag-N2O models in PyKGML only include the final deployable architectures of the original models, and do not include the strategies involved in pretraining and fine-tuning steps to improve the model performances. Instead, we generalize the process of model pre-training and fine-tuning for all models included in the gallery.
 
