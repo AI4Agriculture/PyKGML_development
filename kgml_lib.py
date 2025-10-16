@@ -9,14 +9,17 @@
 import numpy as np
 import pandas as pd
 import math
-from io import open
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import subprocess as sp
 import matplotlib.pyplot as plt
 import scipy.stats as stats
-from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+from sklearn.metrics import r2_score, mean_squared_error
+import ast
+import re
+from collections import OrderedDict
+
 
 ##########################################################################################
 #basic functions
@@ -743,9 +746,6 @@ def sum_flux_mask_re(Reco_pred, NEE_pred, Reco_obs, NEE_obs,Y1_mask):
 #loss function customization
 #
 ##########################################################################################
-import ast
-from collections import OrderedDict
-import re
 
 # Must define this function here, otherwise the namespace = globals() can't find this function
 
@@ -1037,8 +1037,6 @@ class LossFunctionCompiler:
 #model architecture design
 #
 ##########################################################################################
-import re
-from time_series_models import TimeSeriesModel, Attention
 
 def extract_functions(expr: str) -> tuple[list[str], list[str]]:
     """
