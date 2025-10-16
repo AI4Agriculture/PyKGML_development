@@ -43,7 +43,7 @@ Each file is a serialized Python dictionary containing the following keys and va
 
 **Environment**  
 We use Jupyter Notebook ([try it online or install locally](https://docs.jupyter.org/en/stable/start/)) for Python to example PyKGML usage on both cloud and local environments:  
-  1. **Google Colab** (recommended for new users): is a hosted Jupyter Notebook service that requires no setup to use and provides free access to computing resources including GPUs. To get started with Google Colab, please refer to [Colab's official tutorial](https://colab.research.google.com/). The Colab notebook on PyKGML demonstration is [Tutorial_CO2_Colab.ipynb](Tutorial_CO2_Colab.ipynb). ***Note: Remember to change the runtime type to include a "GPU" resource before running the code!
+  1. **Google Colab** (recommended for new users): is a hosted Jupyter Notebook service that requires no setup to use and provides free access to computing resources including GPUs. To get started with Google Colab, please refer to [Colab's official tutorial](https://colab.research.google.com/). The Colab notebook on PyKGML demonstration is [Tutorial_CO2_Colab.ipynb](Tutorial_CO2_Colab.ipynb). **Note**: Remember to change the runtime type to include a "GPU" resource before running the code!
 
   2. **Local** (or other cloud computing platform): The notebook on local PyKGML demonstration is [Tutorial_CO2_local.ipynb](Tutorial_CO2_local.ipynb). To use this notebook, The following applications and packages are required:  
       - Python 3 ([download](https://www.python.org/downloads/))  
@@ -52,104 +52,105 @@ We use Jupyter Notebook ([try it online or install locally](https://docs.jupyter
         - numpy  
         - pandas  
         - torch  
-        - subprocess  
-        - ast  
-        - collections  
-        - re  
         - matplotlib  
         - sklearn  
         - scipy  
-        - inspect  
+
+  Required packages can be installed using the bash command:
+
+```bash
+pip install -r requirements.txt
+```
 
 ****
 **Get started** with the PyKGML tutorial, [Tutorial_CO2_Colab.ipynb](Tutorial_CO2_Colab.ipynb) or [Tutorial_CO2_local.ipynb](Tutorial_CO2_local.ipynb).  
 
 **Import a model and the data preparer:**  
-
-    from time_series_models import GRUSeq2SeqWithAttention, SequenceDataset
-
+```python
+from time_series_models import GRUSeq2SeqWithAttention, SequenceDataset
+```
 **Load and prepare data:**
+```python
+co2_finetune_file = data_path + 'co2_finetune_data.sav'
+data = torch.load(co2_finetune_file, weights_only=False)
+X_train = data['X_train']
+X_test = data['X_test']
+Y_train = data['Y_train']
+Y_test = data['Y_test']
+y_scaler = data['y_scaler']
 
-    co2_finetune_file = data_path + 'co2_finetune_data.sav'
-    data = torch.load(co2_finetune_file, weights_only=False)
-    X_train = data['X_train']
-    X_test = data['X_test']
-    Y_train = data['Y_train']
-    Y_test = data['Y_test']
-    y_scaler = data['y_scaler']
-
-    sequence_length = 365
-    train_dataset = SequenceDataset(X_train, Y_train, sequence_length)
-    test_dataset = SequenceDataset(X_test, Y_test, sequence_length)
-
+sequence_length = 365
+train_dataset = SequenceDataset(X_train, Y_train, sequence_length)
+test_dataset = SequenceDataset(X_test, Y_test, sequence_length)
+```
 **Model setup:**
+```python
+model = GRUSeq2SeqWithAttention(input_dim, hidden_dim, num_layers, output_dim, dropout)
+model.train_loader = DataLoader(train_dataset, batch_size, shuffle=True)
+model.test_loader  = DataLoader(test_dataset, batch_size, shuffle=False)
 
-    model = GRUSeq2SeqWithAttention(input_dim, hidden_dim, num_layers, output_dim, dropout)
-    model.train_loader = DataLoader(train_dataset, batch_size, shuffle=True)
-    model.test_loader  = DataLoader(test_dataset, batch_size, shuffle=False)
-
-    # set up hyperparameters:
-    learning_rate = 0.001
-    step_size = 40
-    max_epoch = 200
-    gamma = 0.8
-    # loss function
-    loss_function = nn.L1Loss()
-
+# set up hyperparameters:
+learning_rate = 0.001
+step_size = 40
+max_epoch = 200
+gamma = 0.8
+# loss function
+loss_function = nn.L1Loss()
+```
 **Training and testing:**
-
-    model.train_model(loss_fun=loss_function, LR=learning_rate, step_size=step_size, gamma=gamma, maxepoch=max_epoch)
-    model.test()
-
+```python
+model.train_model(loss_fun=loss_function, LR=learning_rate, step_size=step_size, gamma=gamma, maxepoch=max_epoch)
+model.test()
+```
 **Loss function desgin**
+```python
+from customize_loss import CarbonFluxLossCompiler
 
-    from customize_loss import CarbonFluxLossCompiler
+script_config = {
+    'parameters': {
+        ...
+        },
 
-    script_config = {
-        'parameters': {
-            ...
-            },
-
-        'variables': {
-            ...
-            },
-        
-        'loss_fomula': {
-            ...
-            }
+    'variables': {
+        ...
+        },
+    
+    'loss_fomula': {
+        ...
         }
-    # Create the compiler
-    compiler = CarbonFluxLossCompiler(script_config)
+    }
+# Create the compiler
+compiler = CarbonFluxLossCompiler(script_config)
 
-    # Create the loss function class
-    CarbonFluxLoss = compiler.generate_class()
-    loss_fn = CarbonFluxLoss()
-
+# Create the loss function class
+CarbonFluxLoss = compiler.generate_class()
+loss_fn = CarbonFluxLoss()
+```
 **Model structure desgin**
+```python
+from customize_module import FlexibleModelCompiler
 
-    from customize_module import FlexibleModelCompiler
+script_config = {
+    'class_name': 'my_KGML',
+    'base_class': 'TimeSeriesModel',
+    'init_params': {
+        ...
+        },
 
-    script_config = {
-        'class_name': 'my_KGML',
-        'base_class': 'TimeSeriesModel',
-        'init_params': {
-            ...
-            },
-
-        'layers': {
-            ...
-            },
-        'forward': {
-            ...
-            }
+    'layers': {
+        ...
+        },
+    'forward': {
+        ...
         }
+    }
 
-    # Create the compiler
-    compiler = FlexibleModelCompiler(script_config)
+# Create the compiler
+compiler = FlexibleModelCompiler(script_config)
 
-    # Create the model
-    myKGML = Compiler.generate_model()
-
+# Create the model
+myKGML = Compiler.generate_model()
+```
 Details and example can be found in the tutorial, [Tutorial_CO2_Colab.ipynb](Tutorial_CO2_Colab.ipynb) or [Tutorial_CO2_local.ipynb](Tutorial_CO2_local.ipynb).
 
 

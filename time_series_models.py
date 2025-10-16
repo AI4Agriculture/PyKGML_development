@@ -206,16 +206,16 @@ def ML_vis_prediction_results(prediction_results, features, y_scaler, sites:int,
 ''' End of Machine Learning Models'''
 
 class SequenceDataset(Dataset):
-    def __init__(self, inputs, outputs, days_per_year=365):
+    def __init__(self, inputs, outputs, sequence_length=365):
         """
         Args:
             inputs (np.ndarray): Array of shape (num_sites, time_steps, num_input_features)
             outputs (np.ndarray): Array of shape (num_sites, time_steps, num_output_features)
-            days_per_year (int): Number of consecutive days for each year.
+            sequence_length (int): Number of consecutive days for each year.
         """
         self.inputs = inputs
         self.outputs = outputs
-        self.sequence_length = days_per_year
+        self.sequence_length = sequence_length
         
         self.samples = []
         num_sites = inputs.shape[0]
