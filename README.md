@@ -248,5 +248,7 @@ Funding sources for this research includes:
 5. National Science Foundation: ESIIL (award No. 2153040), AI for Natural Methane working group
 6. Department of Energy: Environmental System Science (award No. DE-SC0024360)
 
+We acknowledge Yufeng Yang, An Min, and Chongwei Chen, for their significant contributions to the development of PyKGML. 
+
 # Contact
 Please contact the corresponding author Dr. Licheng Liu (lichengl@umn.edu) to provide your feedback.
