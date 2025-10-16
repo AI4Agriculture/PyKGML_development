@@ -1,0 +1,28 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: PyKGML
+message: 'If you use this PyKGML, please cite it as below.'
+type: software
+authors:
+  - given-names: Licheng
+    family-names: Liu
+    affiliation: University of Minnesota Twin Cities
+  - affiliation: University of Minnesota Twin Cities
+    given-names: Yufeng
+    family-names: Yang
+  - given-names: An
+    family-names: Min
+    affiliation: University of Minnesota Twin Cities
+  - given-names: Chongwei
+    family-names: Chen
+    affiliation: University of Minnesota Twin Cities
+identifiers:
+  - type: url
+    value: 'https://github.com/AI4Agriculture/PyKGML_development/'
+abstract: >-
+  This is a Python library for knowledge-guided machine
+  learning development.
+version: '2.0'
+date-released: '2025-10-16'
