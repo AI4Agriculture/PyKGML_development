@@ -69,7 +69,7 @@ pip install -r requirements.txt
 ```python
 from time_series_models import GRUSeq2SeqWithAttention, SequenceDataset
 ```
-**Load and prepare data:**
+**1. Load and prepare data:**
 ```python
 co2_finetune_file = data_path + 'co2_finetune_data.sav'
 data = torch.load(co2_finetune_file, weights_only=False)
@@ -83,7 +83,7 @@ sequence_length = 365
 train_dataset = SequenceDataset(X_train, Y_train, sequence_length)
 test_dataset = SequenceDataset(X_test, Y_test, sequence_length)
 ```
-**Model setup:**
+**2. Model setup:**
 ```python
 model = GRUSeq2SeqWithAttention(input_dim, hidden_dim, num_layers, output_dim, dropout)
 model.train_loader = DataLoader(train_dataset, batch_size, shuffle=True)
@@ -97,14 +97,14 @@ gamma = 0.8
 # loss function
 loss_function = nn.L1Loss()
 ```
-**Training and testing:**
+**3. Training and testing:**
 ```python
 model.train_model(loss_fun=loss_function, LR=learning_rate, step_size=step_size, gamma=gamma, maxepoch=max_epoch)
 model.test()
 ```
-**Loss function desgin**
+**4. Loss function desgin**
 ```python
-from customize_loss import CarbonFluxLossCompiler
+from kgml_lib import LossFunctionCompiler
 
 script_config = {
     'parameters': {
@@ -120,18 +120,18 @@ script_config = {
         }
     }
 # Create the compiler
-compiler = CarbonFluxLossCompiler(script_config)
+compiler = LossFunctionCompiler(script_config)
 
 # Create the loss function class
 CarbonFluxLoss = compiler.generate_class()
 loss_fn = CarbonFluxLoss()
 ```
-**Model structure desgin**
+**5. Model structure desgin**
 ```python
-from customize_module import FlexibleModelCompiler
+from kgml_lib import ModelStructureCompiler
 
 script_config = {
-    'class_name': 'my_KGML',
+    'class_name': ,
     'base_class': 'TimeSeriesModel',
     'init_params': {
         ...
@@ -146,7 +146,7 @@ script_config = {
     }
 
 # Create the compiler
-compiler = FlexibleModelCompiler(script_config)
+compiler = ModelStructureCompiler(script_config)
 
 # Create the model
 myKGML = Compiler.generate_model()
@@ -169,7 +169,7 @@ Two datasets were harmonized using the CO<sub>2</sub> flux dataset from study 2 
     - 100 samples (100 sites).
     - Each sample is a 6570 daily sequence over 18 years (2001-2018). 
     - 19 input_features and 3 output_features.    
-    - Data split: the first 16 years for training, and the last two years for testing.
+    - Data split: 80 sites for training and the other 20 sites for testing.
 
     Input features (19):
     - Meterological (7): solar radiation (RADN), max air T (TMAX_AIR), (max-min) air T (TDIF_AIR), max air humidity (HMAX_AIR), (max-min) air humidity (HDIF_AIR), wind speed (WIND), precipitation (PRECN).
