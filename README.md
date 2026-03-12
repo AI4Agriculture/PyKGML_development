@@ -6,7 +6,7 @@ PyKGML [(GitHub repo)](https://github.com/AI4Agriculture/PyKGML_development) is 
 # How to use PyKGML
 
 ### Data
-The example datasets can be downloaded from Zenodo: https://doi.org/10.5281/zenodo.15580484   
+The example datasets can be downloaded from Zenodo: https://doi.org/10.5281/zenodo.17161653
 It includes four files:
   - **co2_pretrain_data.sav**: the synthetic dataset of KGMLag-CO2.
   - **co2_finetune_data.sav**: the observation dataset of KGMLag-CO2.
