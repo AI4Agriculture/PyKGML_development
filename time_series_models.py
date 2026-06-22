@@ -842,7 +842,7 @@ class RecoGRU_KGML(TimeSeriesModel):
         # sequence_length = self.sequence_length
         self.gru_basic = nn.GRU(input_dim,hidden_dim,2,dropout=dropout, batch_first=True)
         self.gru_Ra = nn.GRU(input_dim+hidden_dim, hidden_dim,1,batch_first=True)
-        self.gru_Rh = nn.GRU(input_dim+hidden_dim+1, hidden_dim,2,dropout=dropout, batch_first=True)#+1 means res ini 
+        self.gru_Rh = nn.GRU(input_dim+hidden_dim, hidden_dim,2,dropout=dropout, batch_first=True) 
         self.gru_NEE = nn.GRU(input_dim+2, hidden_dim,1, batch_first=True)#+2 Ra and Rh
         self.drop=nn.Dropout(dropout)
         self.densor_Ra = nn.Linear(hidden_dim, 1)
@@ -901,24 +901,6 @@ class RecoGRU_KGML(TimeSeriesModel):
         #Ra
         output1 , hidden2 = self.gru_Ra(torch.cat((self.drop(output),inputs), 2), hidden[1])
         Ra = self.densor_Ra(self.drop(output1))
-        
-        #Rh
-        #caculate annual Res
-        #Annual GPP+ Annual Ra - Yield, GPP is no.8 inputs
-        # annual_GPP = torch.sum(Z_norm_reverse(inputs[:,:,8],self.GPP_scaler),dim=1).view(-1,1,1)
-        # annual_Ra = torch.sum(Z_norm_reverse(Ra[:,:,0],self.Ra_scaler),dim=1).view(-1,1,1)
-        # annual_Yield = Z_norm_reverse(output2[:,0,0],self.Yield_scaler).view(-1,1,1)
-        # #control 0< Res_ini < GPP
-        # Res_ini = self.ReLU(annual_GPP+annual_Ra - annual_Yield)
-        # #Res_ini[Res_ini > annual_GPP].data = annual_GPP[Res_ini > annual_GPP].data 
-        # #scale Res_ini
-        # Res_ini = Z_norm_with_scaler(Res_ini,self.Res_scaler)
-        # ##calculate Rh now with current year res
-        # Res = Res_ini.repeat(1, self.sequence_length, 1)
-        # #left day 300
-        # Res[:,0:298,:] = 0.0
-        # Res[:,300:,:] = 0.0
-        # output1, hidden3  = self.gru_Rh(torch.cat((Res,self.drop(output),inputs), 2), hidden[2])
         output1, hidden3  = self.gru_Rh(torch.cat((self.drop(output),inputs), 2), hidden[2])
         Rh = self.densor_Rh(self.drop(output1))
         
