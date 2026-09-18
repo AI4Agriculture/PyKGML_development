@@ -252,4 +252,4 @@ Funding sources for this research includes:
 We acknowledge Yufeng Yang, An Min, and Chongwei Chen, for their significant contributions to the development of PyKGML. 
 
 # Contact
-Please contact the corresponding author Dr. Licheng Liu (lichengl@umn.edu) to provide your feedback.
+Please contact the corresponding author Dr. Licheng Liu (licheng.liu@wisc.edu) to provide your feedback.
