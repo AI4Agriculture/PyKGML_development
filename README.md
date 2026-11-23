@@ -244,10 +244,11 @@ Models of KGMLag-CO2 and KGMLag-N2O were added to the model gallery of PyKGML so
 Funding sources for this research includes:  
 1. This research is part of [AI-LEAF: AI Institute for Land, Economy, Agriculture & Forestry](https://cse.umn.edu/aileaf) and is supported by USDA National Institute of Food and Agriculture and the National Science Foundation National AI Research Institutes Competitive Award No. 2023-67021-39829.
 2. National Science Foundation: Information and Intelligent Systems (award No. 2313174).
-3. The Forever Green Initiative of the University of Minnesota, using funds from the State of Minnesota Clean Water Fund provided by the Minnesota Department of Agriculture.  
-4. National Science Foundation: Signal in the Soil program (award No. 2034385).
-5. National Science Foundation: ESIIL (award No. 2153040), AI for Natural Methane working group
-6. Department of Energy: Environmental System Science (award No. DE-SC0024360)
+3. National Science Foundation: Smart and Connected Communities (award No. 2125626).
+4. The Forever Green Initiative of the University of Minnesota, using funds from the State of Minnesota Clean Water Fund provided by the Minnesota Department of Agriculture.  
+5. National Science Foundation: Signal in the Soil program (award No. 2034385).
+6. National Science Foundation: ESIIL (award No. 2153040), AI for Natural Methane working group
+7. Department of Energy: Environmental System Science (award No. DE-SC0024360)
 
 We acknowledge Yufeng Yang, An Min, and Chongwei Chen, for their significant contributions to the development of PyKGML. 
 
